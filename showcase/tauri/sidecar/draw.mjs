@@ -6,8 +6,8 @@ import { z } from 'zod';
 import { checkUrl } from './safety.mjs';
 import { COUNTRIES } from './countries.mjs';
 
-export const LIMITS = { beats: 12, marks: 40, points: 200, parts3d: 40, atoms: 120, photoBytes: 800_000, iconBytes: 64_000,
-  nodes: 16, links: 24, columns: 6, rows: 12, bars: 12, labels: 8, pins: 12, shade: 40, routes: 8, steps: 10, tex: 300, vertices: 16, questions: 6, cardsShown: 8 };
+export const LIMITS = { beats: 25, marks: 40, points: 200, parts3d: 40, atoms: 120, photoBytes: 800_000, iconBytes: 64_000,
+  nodes: 16, links: 24, columns: 6, rows: 12, bars: 12, labels: 8, pins: 12, shade: 40, routes: 8, steps: 10, tex: 300, vertices: 16, questions: 6, cardsShown: 25 };
 export const TONES = ['accent', 'teal', 'amber', 'coral', 'lilac', 'sky', 'lime', 'red', 'white'];
 // Marks on the real screen (they need a place on it), actions in apps, and cards drawn on calm space.
 export const SCREEN = ['point', 'target', 'hover', 'ring', 'frame', 'underline', 'strike', 'check', 'cross', 'connect', 'trace', 'num', 'label', 'write', 'scroll', 'spotlight', 'highlight', 'line', 'curve', 'arrow', 'circle', 'rect'];
@@ -39,7 +39,7 @@ const Mark = z.object({
   card_size: z.enum(['small', 'normal', 'large', 'full']).optional(),
   name: z.string().max(20).optional(), url: z.string().max(2000).optional(), query: z.string().min(1).max(100).optional(),
   title: z.string().min(1).max(60).optional(), heading: z.string().min(1).max(80).optional(),
-  items: z.array(z.string().min(1).max(120)).max(12).optional(),
+  items: z.array(z.string().min(1).max(120)).max(30).optional(),
   branches: z.array(z.object({ text: z.string().min(1).max(60), items: z.array(z.string().min(1).max(60)).max(6).optional(), tone: z.enum(TONES).optional() })).max(8).optional(),
   sources: z.array(z.object({ name: z.string().min(1).max(40), url: z.string().max(2000) })).max(8).optional(),
   x_range: pair.optional(), y_range: pair.optional(),
@@ -53,7 +53,7 @@ const Mark = z.object({
     shape: z.enum(SHAPES), at: triple.optional(), size: z.preprocess((v) => (typeof v === 'number' ? [v, v, v] : v), triple).optional(), rot: triple.optional(),
     tone: z.enum(TONES).optional(), label: z.string().max(30).optional(),
     motion: z.object({ do: z.enum(MOTIONS), axis: z.enum(['x', 'y', 'z']).optional(), around: triple.optional(), to: triple.optional(), secs: num.optional() }).optional(),
-  })).max(LIMITS.parts3d).describe('3D parts. Use torus ONLY for a solid ring hugging a single planet equator (centered at the planet at, ~2.5x planet size). NEVER use torus for orbital ellipses or paths around the Sun—use motion:{do:"orbit",around:[x,y,z],secs} on planets instead, and small orbiting rocks for asteroid belts.').optional(),
+  })).max(LIMITS.parts3d).optional(),
   nodes: z.array(z.object({ id: z.string().min(1).max(16), text: z.string().min(1).max(60), shape: z.enum(NODE_SHAPES).optional(), tone: z.enum(TONES).optional() })).max(LIMITS.nodes).optional(),
   links: z.array(z.object({ from: z.string().min(1).max(16), to: z.string().min(1).max(16), label: z.string().max(30).optional(), flow: z.boolean().optional() })).max(LIMITS.links).optional(),
   flow: z.boolean().optional(), animate: z.boolean().optional(),
@@ -96,7 +96,7 @@ const vecs = (o, keys) => Object.fromEntries(Object.entries(o).map(([k, v]) => [
 // Lists and places sent as JSON text ("[{…}]"), as DeepSeek does, are read as what they say.
 const SHAPED = new Set(['at', 'to', 'tie', 'points', 'items', 'branches', 'sources', 'x_range', 'y_range', 'plots', 'dots', 'keys', 'events', 'parts',
   'nodes', 'links', 'columns', 'rows', 'bars', 'labels', 'shade', 'pins', 'routes', 'steps', 'vertices', 'lines', 'angles', 'circles', 'questions', 'action', 'marks', 'beats', 'edit']);
-export const unjson = (v) => { if (typeof v !== "string") return v; let t = v.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim(); for (let i=0;i<2&&typeof t==="string";i++) { if (/^["']/.test(t)) { try { t=JSON.parse(t); continue; } catch {} } if (/^[[{]/.test(t)) { try { t=JSON.parse(t); continue; } catch { try { t=JSON.parse(t.replace(/,\s*([}\]])/g,"$1")); continue; } catch {} } } break; } return t; };
+export const unjson = (v) => { if (typeof v !== 'string' || !/^\s*[[{]/.test(v)) return v; try { return JSON.parse(v); } catch { return v; } };
 const parsed = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, SHAPED.has(k) ? unjson(v) : v]));
 function fixShapes(m) {
   const out = parsed(m);
@@ -120,11 +120,6 @@ function tidyMark(m) {
   for (const k of ['at', 'to', 'tie']) if (typeof m[k] === 'string' && m[k].trim()) m = { ...m, [k]: { text: m[k].trim() } };
   // An empty field (text: "") is one left out, not a mistake to send back.
   if (Object.values(m).includes('')) m = Object.fromEntries(Object.entries(m).filter(([, v]) => v !== ''));
-  const KIND_ARR = { list: "items", math: "steps", model: "parts", quiz: "questions", timeline: "events", mindmap: "branches", flow: "nodes", graph: "plots" };
-  for (const [k, arrKey] of Object.entries(KIND_ARR)) {
-    if (isObj(m[k])) { const sub = m[k]; delete m[k]; m = { kind: m.kind || k, ...sub, ...m }; }
-    else if (Array.isArray(m[k])) { const arr = m[k]; delete m[k]; m = { kind: m.kind || k, [arrKey]: arr, ...m }; }
-  }
   m = fixShapes(m);
   if (!m.kind) {
     if (Array.isArray(m.nodes) || Array.isArray(m.links)) m = { ...m, kind: 'flow' };
@@ -144,66 +139,6 @@ function tidyMark(m) {
     else if (typeof m.text === 'string' || typeof m.heading === 'string') m = { ...m, kind: 'card' };
   }
   const strId = (v) => (typeof v === 'number' ? String(v) : v);
-  if (typeof m.kind === "string") { const first = Array.isArray(m[m.kind]) && m[m.kind].length === 1 ? m[m.kind].at(0) : m[m.kind]; const raw = isObj(first) ? first : null; if (raw) { delete m[m.kind]; m = { ...raw, ...m }; } }
-  if (m.kind === "graph" && Array.isArray(m.plots)) {
-    const pts = m.plots.flatMap((p) => (Array.isArray(p?.points) ? p.points : [])).filter((pt) => Array.isArray(pt) && pt.length >= 2);
-    if (pts.length && !Array.isArray(m.x_range)) { const xs = pts.map((p) => Number(p[0])).filter(Number.isFinite); if (xs.length) m.x_range = [Math.min(...xs), Math.max(...xs)]; }
-    if (pts.length && !Array.isArray(m.y_range)) { const ys = pts.map((p) => Number(p[1])).filter(Number.isFinite); if (ys.length) m.y_range = [Math.min(...ys), Math.max(...ys)]; }
-  }
-  if (m.kind === "model" && Array.isArray(m.parts) && m.parts.length > 1) {
-    const kept = m.parts.filter((p) => !/^card(\s*base)?$/i.test(String(p?.label || "").trim()));
-    if (kept.length) m.parts = kept;
-    if (m.parts.length > 1 && /\b(single\s+)?(cube|sphere)\b/i.test(String(m.title || ""))) m.parts = [m.parts[0]];
-    m.parts = m.parts.filter((p) => !(p?.shape === "torus" && /orbit|ellipse|path|track/i.test(String(p.label || ""))));
-    const tr = m.parts.find((p) => p?.shape === "torus");
-    const spheres = m.parts.filter((p) => p?.shape === "sphere");
-    const tat = Array.isArray(tr?.at) ? tr.at : new Array(0, 0, 0);
-    const sp = tr ? spheres.filter((x) => !/^sun$/i.test(String(x.label || "").trim())).sort((a, b) => {
-      const aa = Array.isArray(a.at) ? a.at : new Array(0, 0, 0), bb = Array.isArray(b.at) ? b.at : new Array(0, 0, 0);
-      return Math.hypot((aa.at(0)||0)-(tat.at(0)||0), (aa.at(1)||0)-(tat.at(1)||0), (aa.at(2)||0)-(tat.at(2)||0)) - Math.hypot((bb.at(0)||0)-(tat.at(0)||0), (bb.at(1)||0)-(tat.at(1)||0), (bb.at(2)||0)-(tat.at(2)||0));
-    }).at(0) : null;
-    if (tr && !sp) {
-      const sun = spheres.at(0), sat = Array.isArray(sun?.at) ? sun.at : tat;
-      const cx = sat.at(0) || 0, cy = sat.at(1) || 0, cz = sat.at(2) || 0;
-      const tsz = Array.isArray(tr.size) ? tr.size : new Array(1.4, 0.2, 1.4);
-      const rad = Math.max(tsz.at(0) || 1.2, tsz.at(2) || 1.2) * 0.45;
-      m.parts = m.parts.filter((p) => p !== tr);
-      for (let k = 0; k < 16 && m.parts.length < 36; k++) {
-        const ang = (k / 16) * Math.PI * 2, r0 = rad * (0.9 + (k % 3) * 0.08);
-        m.parts.push({ shape: k % 2 ? "box" : "sphere", at: new Array(cx + Math.cos(ang) * r0, cy + ((k % 3) - 1) * 0.03, cz + Math.sin(ang) * r0), size: 0.055 + (k % 3) * 0.015, tone: tr.tone || "amber", motion: { do: "orbit", around: new Array(cx, cy, cz), secs: 9 + (k % 5) * 1.5 } });
-      }
-    } else if (sp && tr) {
-      const sat = Array.isArray(sp.at) ? sp.at : new Array(0, 0, 0);
-      const cx = sat.at(0) || 0, cy = sat.at(1) || 0, cz = sat.at(2) || 0;
-      const ssz = Array.isArray(sp.size) ? sp.size : new Array(Number(sp.size) || 0.6, Number(sp.size) || 0.6, Number(sp.size) || 0.6);
-      const d0 = Math.max(...ssz, 0.5);
-      const trs = m.parts.filter((p) => p?.shape === "torus");
-      if (trs.length === 1 && /\brings\b|saturn/i.test(String(m.title || "") + " " + String(tr.label || ""))) {
-        const outer = { ...tr, label: undefined, tone: tr.tone === "amber" ? "sky" : "amber" };
-        m.parts.push(outer); trs.push(outer);
-      }
-      trs.forEach((t0, idx) => {
-        const sc = d0 * (2.2 + idx * 0.85);
-        t0.at = new Array(cx, cy, cz);
-        t0.rot = new Array(26, 0, 14);
-        t0.size = new Array(sc, d0 * 0.34, sc);
-      });
-      if (/asteroid|belt/i.test(String(m.title || "") + " " + String(tr.label || ""))) {
-        const rad = d0 * 1.07;
-        for (let k = 0; k < 14 && m.parts.length < 36; k++) {
-          const ang = (k / 14) * Math.PI * 2, r0 = rad * (0.92 + (k % 3) * 0.08);
-          m.parts.push({ shape: k % 2 ? "box" : "sphere", at: new Array(cx + Math.cos(ang) * r0, cy + ((k % 3) - 1) * 0.03, cz + Math.sin(ang) * r0), size: d0 * (0.07 + (k % 3) * 0.02), tone: tr.tone || "amber", motion: { do: "orbit", around: new Array(cx, cy, cz), secs: 7 + (k % 5) * 1.4 } });
-        }
-      }
-    }
-  }
-    if (m.kind === "molecule") {
-    const SMILES = { caffeine: "CN1C=NC2=C1C(=O)N(C(=O)N2C)C", water: "O", ethanol: "CCO", glucose: "C(C1C(C(C(C(O1)O)O)O)O)O", aspirin: "CC(=O)OC1=CC=CC=C1C(=O)O", dopamine: "C1=CC(=C(C=C1CCN)O)O", serotonin: "C1=CC2=C(C=C1O)C(=CN2)CCN", benzene: "c1ccccc1", methane: "C" };
-    const key = String(m.label || m.name || m.title || m.smiles || "").trim().toLowerCase();
-    for (const [nm, sm] of Object.entries(SMILES)) if (key === nm || key.includes(nm)) { if (!m.smiles || !/^[A-Za-z0-9@+-[]()\/=#$%.:~]+$/.test(m.smiles)) m.smiles = sm; break; }
-  }
-  if (m.kind === "list" && Array.isArray(m.items)) m.items = m.items.map((x) => (isObj(x) ? String(x.text ?? x.label ?? x.title ?? "") : x));
-  if (m.kind === "model" && Array.isArray(m.parts)) m.parts = m.parts.map((p) => (isObj(p) ? { at: new Array(3).fill(0), size: [1.4, 1.4, 1.4], ...p } : p));
   if (Array.isArray(m.vertices)) m = { ...m, vertices: each(m.vertices, (v) => ('id' in v ? { ...v, id: strId(v.id) } : v)) };
   if (Array.isArray(m.lines)) m = { ...m, lines: each(m.lines, (l) => ({ ...l, ...('from' in l ? { from: strId(l.from) } : {}), ...('to' in l ? { to: strId(l.to) } : {}) })) };
   if (Array.isArray(m.angles)) m = { ...m, angles: each(m.angles, (a) => ({ ...a, ...('at' in a ? { at: strId(a.at) } : {}), ...('from' in a ? { from: strId(a.from) } : {}), ...('to' in a ? { to: strId(a.to) } : {}) })) };
@@ -216,7 +151,6 @@ function tidyMark(m) {
   return m;
 }
 function tidyBeat(b) {
-  if (isObj(b) && (b.wait === "click" || b.wait === "hover") && !(Array.isArray(b.marks) && b.marks.some((mk) => mk?.kind === "target" || mk?.kind === "hover"))) { const { wait, ...rest } = b; b = rest; }
   if (!isObj(b)) return b;
   b = parsed(b);
   const extra = loose(b, BEAT_KEYS);
@@ -241,9 +175,7 @@ export function readSecs(marks) {
   return words ? Math.min(30, Math.max(3, Math.round(words / 3.3))) : 0;
 }
 export function tidyDraw(a) {
-  a = unjson(a);
   if (isObj(a)) a = parsed(a);
-  if (isObj(a)) { for (const k of ["keep","deep"]) if (typeof a[k]==="string") a[k]=a[k].toLowerCase()==="true"; if (isObj(a.beats)) a={...a,beats:[a.beats]}; }
   // A lone mark sent as the whole call, with no beats (DeepSeek).
   if (isObj(a) && a.beats === undefined && !a.edit && typeof a.kind === 'string') a = { ...a, beats: [{ marks: [] }] };
   if (!isObj(a) || !Array.isArray(a.beats)) return a;
@@ -255,14 +187,13 @@ export function tidyDraw(a) {
 }
 const Beat = z.object({ say: z.string().max(240), marks: z.array(Mark).max(LIMITS.marks), wait: z.enum(['click', 'hover']).optional() });
 const Edit = z.object({ do: z.enum(['recolor', 'move', 'erase', 'clear']), part: z.string().max(8).optional(), tone: z.enum(TONES).optional(), dx: num.optional(), dy: num.optional() });
-const DrawArgsObj = z.object({
+export const DrawArgs = z.preprocess(tidyDraw, z.object({
   target: z.string().optional(),
   beats: z.array(Beat).max(LIMITS.beats).optional(),
   edit: z.array(Edit).max(20).optional(),
   deep: z.boolean().optional(),
   keep: z.boolean().optional(),
-});
-export const DrawArgs = z.preprocess((raw) => { const t = tidyDraw(raw); const r = DrawArgsObj.safeParse(t); if (!r.success) console.error("[draw-invalid-args]", JSON.stringify({ issues: r.error.issues, raw })); return t; }, DrawArgsObj);
+}));
 
 /** What the model is shown of draw, from its lean schema: every field and type, but a card's list items (bars, nodes,
  *  parts …) only as objects with their counts; their fields are in draw's description. */

@@ -29,21 +29,6 @@
   const reduced = () => reducedMQ.matches;
   const sleep = (ms) => new Promise((r) => setTimeout(r, reduced() ? Math.min(ms, 60) : ms));
   const frame = () => Promise.race([new Promise((r) => requestAnimationFrame(r)), sleep(35)]);
-  let inlineBox = null;
-  function closeInlineEdit() { if (!inlineBox) return; inlineBox.remove(); inlineBox = null; R.ink.invoke?.('set_typing', { on: false }); touch(0.2); }
-  function openInlineEdit({ title, value = '', placeholder = 'Type here…', x, y, w = 280, onSave }) {
-    closeInlineEdit();
-    const wrap = document.createElement('div'), sx = clamp(x, 12, Math.max(12, innerWidth - w - 16)), sy = clamp(y, 12, Math.max(12, innerHeight - 84));
-    Object.assign(wrap.style, { position: 'fixed', left: sx + 'px', top: sy + 'px', width: w + 'px', zIndex: '99999', background: 'rgba(6,22,24,0.96)', border: '1.5px solid #78ffe2', borderRadius: '10px', boxShadow: '0 10px 28px rgba(0,0,0,0.65), 0 0 18px rgba(120,255,226,0.22)', padding: '10px 12px', fontFamily: MONO, color: TEXT });
-    const lbl = document.createElement('div'); lbl.textContent = title; Object.assign(lbl.style, { fontSize: '10px', letterSpacing: '0.06em', color: ACC, marginBottom: '6px', textTransform: 'uppercase' });
-    const inp = document.createElement('input'); inp.type = 'text'; inp.value = value; inp.placeholder = placeholder;
-    Object.assign(inp.style, { width: '100%', boxSizing: 'border-box', background: 'rgba(3,15,17,0.9)', border: '1px solid rgba(120,255,226,0.45)', borderRadius: '6px', padding: '6px 8px', color: HOT, fontFamily: MONO, fontSize: '12px', outline: 'none' });
-    const hint = document.createElement('div'); hint.textContent = 'Enter to save · Esc to cancel'; Object.assign(hint.style, { fontSize: '9px', color: DIM, marginTop: '5px' });
-    wrap.append(lbl, inp, hint); document.body.appendChild(wrap); inlineBox = wrap; R.ink.invoke?.('set_typing', { on: true });
-    setTimeout(() => { inp.focus(); inp.select(); }, 10);
-    inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { const v = inp.value.trim(); closeInlineEdit(); if (v) onSave(v); } else if (ev.key === 'Escape') closeInlineEdit(); });
-    inp.addEventListener('blur', () => setTimeout(closeInlineEdit, 120));
-  }
   // Global screen points → this overlay's px.
   const loc = (x, y) => [x - (R.origin?.x ?? 0), y - (R.origin?.y ?? 0)];
   const locRect = (r) => (r ? [...loc(r[0], r[1]), r[2], r[3]] : null);
@@ -569,11 +554,11 @@
     async open(m) { let h = m.url; try { h = new URL(m.url).hostname.replace(/^www\./, ''); } catch {} sfx('whoosh'); leaveAfter(toast(`Opening ${h}`, m.url, { spin: true }), 1800); },
     async handoff(m) { sfx('toolstart'); leaveAfter(toast('Handed off', m.task || m.text || m.label || '', { spin: true }), 2200); },
     async button(m) {
-      const k = 1.15, w = Math.round(textW(m.text, CHIP(k)) + 52), h = 32;
+      const k = 1.15, w = Math.round(textW(m.text, CHIP(k)) + 34), h = 32;
       const r = m.at ? nameSpot(rectOf(m), m.text, [w, h]) : place(w, h, m.part);
       await tap(r[0] + w - 14, r[1] + h - 8); sfx('pop');
-      add({ z: 6, part: m.part, screen: !!m.at, kind: 'button', pill: r, box: [r[0] - 2, r[1] - 4, w + 4, h + 10], hover: false, down: 0, draw(b, l, t) { chip(b, r[0], r[1], w, h, m.text, t - this.born, { k, color: this.color, hover: this.hover, down: now() - this.down < 0.15 }); b.fillStyle = this.hoverId === "close" ? HOT : DIM; for (let j = -3; j <= 3; j++) { b.fillRect(r[0] + w - 14 + j - 1, r[1] + 16 + j - 1, 2, 2); b.fillRect(r[0] + w - 14 + j - 1, r[1] + 16 - j - 1, 2, 2); } },
-        hits() { return [{ rect: [r[0] + w - 24, r[1] + 4, 20, 24], kind: 'close', part: m.part }, { rect: [r[0], r[1], w - 24, h], kind: 'button', part: m.part }]; } });
+      add({ z: 6, part: m.part, screen: !!m.at, kind: 'button', pill: r, box: [r[0] - 2, r[1] - 4, w + 4, h + 10], hover: false, down: 0, draw(b, l, t) { chip(b, r[0], r[1], w, h, m.text, t - this.born, { k, color: this.color, hover: this.hover, down: now() - this.down < 0.15 }); },
+        hits() { return [{ rect: [r[0], r[1], w, h], kind: 'button', part: m.part }]; } });
     },
     async emote(m) {
       const [x, y] = tipNow(); agent()?.act?.(m.name);
@@ -588,7 +573,7 @@
   // leftmost free column and each next one just right of those already up (top to bottom in each column, columns left
   // to right); never on another card or a screen mark.
   let winRect = null;
-  function place(w, h, part, strict = false) {
+  function place(w, h, part, strict = false, allowCenter = true) {
     // Game mode (sidebar.js): cards stack in the panel at the screen's right edge, below the Roamie.
     const side = R.sidebar?.on ? R.sidebar : null;
     const S = scr(), top = S[1] + (side ? side.top : 12), bot = S[3] - 64; // room for the caption
@@ -598,14 +583,14 @@
     const taken = [...up.map((m) => grow(markBox(m), 6)), ...markedNow().map((r) => grow(r, 10)), ...pillsNow(), ...(panel ? [grow(panel, 6)] : [])];
     const roomL = !!winRect && winRect[0] - S[0] >= w + 28, roomR = !!winRect && S[2] - (winRect[0] + winRect[2]) >= w + 28;
     // A window that fills the screen leaves no room beside it: then cards go over it like on an empty screen.
-    const overWin = !winRect || (!roomL && !roomR);
-    const fits = (x) => x >= S[0] + 8 && x + w <= S[2] - 8 && (overWin || x >= winRect[0] + winRect[2] || x + w <= winRect[0]);
+    const overWin = allowCenter; const midL = S[0] + Math.round((S[2] - S[0]) * 0.26), midR = S[0] + Math.round((S[2] - S[0]) * 0.74);
+    const fits = (x) => x >= S[0] + 8 && x + w <= S[2] - 8 && (overWin || ((x + w <= midL || x >= midR) && (!winRect || (!roomL && !roomR) || x >= winRect[0] + winRect[2] || x + w <= winRect[0])));
     const xs = [];
     if (side) { const x = S[2] - Math.max(w, side.width - 32) / 2 - w / 2 - 16; for (let y = top; y + h <= bot; y += 12) { const r = [x, y, w, h]; if (!taken.some((q) => overlap(r, q) > 0)) return r; } if (!strict) return [x, top, w, h]; }
-    if (roomL || overWin) xs.push(S[0] + 16);
+    if (fits(S[0] + 16)) xs.push(S[0] + 16); if (fits(S[2] - w - 16)) xs.push(S[2] - w - 16);
     for (const b of up.map(markBox).sort((a, q) => a[0] - q[0])) { const x = b[0] + b[2] + 8; if (fits(x)) xs.push(x); }
-    if (roomR) xs.push(winRect[0] + winRect[2] + 20);
-    xs.push(S[0] + 16, S[2] - w - 16);
+    if (roomR && fits(winRect[0] + winRect[2] + 20)) xs.push(winRect[0] + winRect[2] + 20);
+    for (const x of [S[0] + 16, S[2] - w - 16]) if (fits(x)) xs.push(x);
     for (const x of xs) for (let y = top; y + h <= bot; y += 12) { const r = [x, y, w, h]; if (!taken.some((q) => overlap(r, q) > 0)) return r; }
     // Too tall to fit between the top and the caption: the first column where it covers nothing else, from the top.
     for (const x of xs) { const r = [x, top, w, h]; if (!taken.some((q) => overlap(r, q) > 0)) return r; }
@@ -615,13 +600,13 @@
   // Where a new card goes. Only a few cards stay up at once and none sits on another: the oldest close to make way
   // (the sidecar hears each one). Regression: eight cards at once left no room, and the last was drawn over the first.
   // A drawing that goes by itself (the tour, the setup showcase) keeps all of its cards.
-  const MAX_CARDS = 8;
+  const MAX_CARDS = 25;
   function roomFor(w, h, part) {
     const old = () => [...new Set(marks.filter((q) => q.alive && q.card && !q.local && !q.pinned && !q.leaving && q.part !== part && !drawnBy.has(q.part)).sort((a, b) => a.born - b.born).map((q) => q.part))];
     const shut = (id) => { R.ink.send?.({ type: 'ink_closed', part: id }); fadeOut(partMarks(id), 0.25); };
     if (!drawnBy.has(part)) for (const id of old().slice(0, -(MAX_CARDS - 1))) shut(id);
     for (;;) {
-      const r = place(w, h, part, true), id = r ? null : old()[0];
+      const r = place(w, h, part, true, false) ?? place(w, h, part, old().length < MAX_CARDS, true), id = r ? null : (old().length >= MAX_CARDS ? old()[0] : null);
       if (r || id == null) return r ?? place(w, h, part);
       shut(id);
     }
@@ -687,8 +672,6 @@
           b.fillStyle = hot ? HOT : DIM; for (let k = -3; k <= 3; k++) { b.fillRect(cx + k - 1, cy + k - 1, 2, 2); b.fillRect(cx + k - 1, cy - k - 1, 2, 2); }
         }
         // A last guard: nothing inside a card is drawn outside it.
-        if (!bar && this.p >= 1) { b.fillStyle = this.hoverId === "close" ? HOT : DIM; for (let k = -3; k <= 3; k++) { b.fillRect(x + w - 13 + k - 1, y + 11 + k - 1, 2, 2); b.fillRect(x + w - 13 + k - 1, y + 11 - k - 1, 2, 2); } }
-        if (!bar && this.p >= 1) { b.fillStyle = this.hoverId === "close" ? HOT : DIM; for (let k = -3; k <= 3; k++) { b.fillRect(x + w - 13 + k - 1, y + 11 + k - 1, 2, 2); b.fillRect(x + w - 13 + k - 1, y + 11 - k - 1, 2, 2); } }
         for (const c of [b, l]) { c.save(); c.beginPath(); c.rect(x + 2, y + bar + 1, w - 4, h - bar - 3); c.clip(); }
         try { inner.call(this, b, l, t, x, y + bar - this.sy, t - this.done); } finally { b.restore(); l.restore(); }
         if (this.scrollMax > 0) {
@@ -700,7 +683,7 @@
         if (this.p >= 1 && !this.full) { b.fillStyle = this.hoverGrip ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + w - 6 - j * 4, y + h - 14 + k * 4, 2, 2); b.fillStyle = this.hoverGripL ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + 4 + j * 4, y + h - 14 + k * 4, 2, 2); }
       },
       hits() {
-        const out = bar ? [{ rect: [x + w - 28, y + 2, 26, 22], kind: 'close', part: m.part }, { rect: [x + w - 54, y + 2, 22, 22], kind: 'full', part: m.part }, { rect: [x + w - 82, y + 2, 24, 22], kind: 'pin', part: m.part }, { rect: [x + w - 106, y + 2, 22, 22], kind: 'save', part: m.part, title: o.title || m.kind }, ...(this.onEdit ? [{ rect: [x + w - 130, y + 2, 22, 22], kind: 'edit', part: m.part }] : []), { rect: [x, y, w - (this.onEdit ? 132 : 108), bar], kind: 'drag', part: m.part }] : [{ rect: [x + w - 24, y + 2, 22, 20], kind: 'close', part: m.part }, { rect: [x, y, Math.max(10, w - 26), Math.min(h, 24)], kind: 'drag', part: m.part }];
+        const out = bar ? [{ rect: [x + w - 28, y + 2, 26, 22], kind: 'close', part: m.part }, { rect: [x + w - 54, y + 2, 22, 22], kind: 'full', part: m.part }, { rect: [x + w - 82, y + 2, 24, 22], kind: 'pin', part: m.part }, { rect: [x + w - 106, y + 2, 22, 22], kind: 'save', part: m.part, title: o.title || m.kind }, ...(this.onEdit ? [{ rect: [x + w - 130, y + 2, 22, 22], kind: 'edit', part: m.part }] : []), { rect: [x, y, w - (this.onEdit ? 132 : 108), bar], kind: 'drag', part: m.part }] : [{ rect: [x, y, w, Math.min(h, 24)], kind: 'drag', part: m.part }];
         if (!this.full) out.unshift({ rect: [x + w - 28, y + h - 28, 32, 32], kind: 'resize', part: m.part }, { rect: [x - 4, y + h - 28, 32, 32], kind: 'resize-l', part: m.part }, { rect: [x + 28, y + h - 6, Math.max(10, w - 56), 20], kind: 'extend', part: m.part }, { rect: [x + w - 6, y + bar, 20, Math.max(10, h - bar - 28)], kind: 'extend-r', part: m.part }, { rect: [x - 14, y + bar, 20, Math.max(10, h - bar - 28)], kind: 'extend-l', part: m.part }, { rect: [x + 12, y - 10, Math.max(10, w - 24), 12], kind: 'extend-t', part: m.part });
         // Links scrolled out of view can't be clicked.
         const more = (this.more?.() ?? []).filter((q) => q.rect[1] >= y + bar && q.rect[1] + q.rect[3] <= y + h);
@@ -793,7 +776,7 @@
       const narrow = wrapRows(m.text, 210 - 28, `500 13px ${MONO}`), w = narrow.length > 12 ? 320 : 210;
       let curW = w, rows = w === 210 ? narrow : wrapRows(m.text, w - 28, `500 13px ${MONO}`);
       const h = 58 + rows.length * 19;
-      await card(m, w, h, function (b, l, t, x, y, age) { const cw = this.w || w; if (Math.abs(cw - curW) > 1) { curW = cw; rows = wrapRows(m.text, cw - 28, `500 13px ${MONO}`); this.grow?.(58 + rows.length * 19); } b.fillStyle = colorOf(this, this.color); b.fillRect(x + 8, y + 8, cw - 16, 3); wrapped(b, rows, x + 14, y + 28, 19, `500 13px ${MONO}`, TEXT, age / (0.3 + m.text.length * 0.025)); }, { title: smartTitle(m, "note"), edge: true });
+      await card(m, w, h, function (b, l, t, x, y, age) { const cw = this.w || w; if (Math.abs(cw - curW) > 1) { curW = cw; rows = wrapRows(m.text, cw - 28, `500 13px ${MONO}`); this.grow?.(58 + rows.length * 19); } b.fillStyle = colorOf(this, this.color); b.fillRect(x + 8, y + 30, cw - 16, 3); wrapped(b, rows, x + 14, y + 50, 19, `500 13px ${MONO}`, TEXT, age / (0.3 + m.text.length * 0.025)); }, { title: smartTitle(m, "note"), edge: true });
       sfx('page');
     },
     // A mind map: the topic on the left, its branches beside it, each branch's points behind a +. A click on a branch
@@ -881,9 +864,8 @@
     // A checklist: a click on a ring ticks an item off (or back), on its words edits it, and "+ Add" adds one. The
     // sidecar asks for the words and hears every change (list_card), and sends the new items back (listItems).
     async list(m) {
-      const HEAD = `700 18px ${DOTO}`, BODY = `400 13px ${MONO}`;
       const normItems = (Array.isArray(m.items) ? m.items : []).map((it) => typeof it === 'string' ? it : String(it?.text ?? it?.label ?? it ?? ''));
-      const S = { items: normItems, done: normItems.map(() => false), born: [], ver: normItems.map(() => 0), down: 0 };
+      S = { items: normItems, done: normItems.map(() => false), born: [], ver: normItems.map(() => 0), down: 0 };
       const ticked = new Map(), ink = new Map();
       // The whole title and every point in full: 280 wide, wider while a point runs past three lines or it's too tall.
       const lay = (w) => {
@@ -927,9 +909,10 @@
       }, { title: smartTitle(m, 'list') });
       c.more = () => hits.map((q) => ({ ...q, part: m.part }));
       c.keep = true;
+      c.onEdit = () => c.pick('add');
       c.pick = (id) => {
         const send = (o) => R.ink.send?.({ type: 'list_card', part: m.part, ...o });
-        if (id === 'add') { S.down = now(); sfx('pip'); openInlineEdit({ title: 'Add Item', placeholder: 'New checklist item…', x: c.ox + c.dx + 14, y: c.oy + c.dy + 34 + L.addY - 12, w: Math.max(240, (c.w || L.w) - 28), onSave: (text) => send({ op: 'add', text }) }); return; }
+        if (id === 'add') { S.down = now(); sfx('pip'); send({ op: 'add' }); return; }
         const i = Number(String(id).slice(1));
         if (!(i >= 0 && i < S.items.length)) return;
         if (id[0] === 'e') { sfx('pip'); send({ op: 'edit', i }); return; } if (id[0] === 'x') { sfx('tick'); S.items.splice(i, 1); S.done.splice(i, 1); S.born.splice(i, 1); S.ver.splice(i, 1); ink.clear(); L = lay(c.w || L.w); c.__ol = {}; c.__at = {}; c.grow(L.h); send({ op: 'remove', i }); return; }
@@ -975,8 +958,6 @@
         i.onerror = () => { clearTimeout(t); res(null); };
         i.src = m.src;
       }) : null;
-      if (!img) return;
-      if (!img) return;
       // About the area of a 240 × 192 frame in the picture's own proportions, no wider than 360 or taller than 300.
       const a = img ? img.naturalWidth / img.naturalHeight : 4 / 3;
       let iw = Math.sqrt(240 * 192 * a), ih = iw / a;
@@ -1115,43 +1096,14 @@
     },
     molecule: (m) => drawMolecule(m),
     async model(m) {
-  const m4mul = (a, b) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]; return o; };
-  const m4rx = (a) => { const c = Math.cos(a), s = Math.sin(a); return [1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]; };
-  const m4ry = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]; };
-  const m4rz = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]; };
-  const m4init = () => m4mul(m4rx(0.38), m4ry(0.6));
-      const w = 320, h = 26 + 298, view3d = R.ink3d?.create(m.parts, w - 24, 210);
-      const AXES = ['Y', 'X', 'Z', 'ALL'];
-      let axis = 'Y', dir = 1, simT = 0, lastReal = null, speed = reduced() ? 0 : 1, paused = false, rotM = m4init(), zoom = 1, panX = 0, panY = 0, panMode = false, lastLabels = [], held = false, dirty = true, lastPx = 0, lastPy = 0, barLeft = 0, barW = 180;
-      const c = await card(m, w, h, function (b, l, t, x, y, age) {
+      const w = 320, h = 26 + 236, view3d = R.ink3d?.create(m.parts, w - 24, 210);
+      await card(m, w, h, function (b, l, t, x, y, age) {
         if (!view3d) { typed(b, '3D isn’t available here', x + w / 2, y + 100, SMALL, DIM, 1, { anchor: 'middle' }); return; }
-        if (!held && !paused && speed > 0) touch(0.5);
-        if (lastReal != null && !held && !paused && speed > 0) {
-          const dt = Math.max(0, t - lastReal) * speed * dir * 1.4; simT += Math.abs(dt);
-          if (axis === 'Y') rotM = m4mul(m4ry(dt), rotM);
-          else if (axis === 'X') rotM = m4mul(m4rx(dt), rotM);
-          else if (axis === 'Z') rotM = m4mul(m4rz(dt), rotM);
-          else rotM = m4mul(m4rz(dt * 0.4), m4mul(m4rx(dt * 0.65), m4mul(m4ry(dt * 0.9), rotM)));
-        }
-        lastReal = t;
-        const u = clamp(age / 0.8, 0, 1), f = view3d.frame(simT, rotM, zoom, dirty, panX, panY); dirty = false; lastLabels = f.labels || [];
+        const u = clamp(age / 0.8, 0, 1), f = view3d.frame(reduced() ? 0 : t);
         for (let i = 0; i < f.lv.length; i++) { const v = f.lv[i]; if (!v) continue; const gx = i % f.gw, gy = (i / f.gw) | 0; if ((B4[(gy % 4) * 4 + (gx % 4)] + 0.5) / 16 > u * 1.05) continue; b.fillStyle = LED[v]; b.fillRect(x + 12 + gx * 3, y + 6 + gy * 3, 3, 3); }
+        // Labels follow their parts as it turns; one that would land on another this frame waits its turn.
         if (u >= 1) { const took = []; for (const lab of f.labels) { const lx = x + 12 + lab.x, ly = y + 6 + lab.y, r = [lx - 2, ly - 14, textW(lab.text, `600 10px ${MONO}`) + 10, 16]; if (took.some((q) => overlap(q, r) > 0)) continue; took.push(r); b.fillStyle = ACC; b.fillRect(lx - 1.5, ly - 1.5, 3, 3); typed(b, lab.text, lx + 6, ly - 4, `600 10px ${MONO}`, TEXT, 1, { rim: 3 }); } }
-        const ay = y + 222; b.font = `500 10px ${MONO}`; b.fillStyle = DIM; b.fillText('AXIS', x + 14, ay + 14);
-        AXES.forEach((ax, idx) => { const bx = x + 46 + idx * 35, bw = 31, bh = 20, on = axis === ax; b.fillStyle = on ? rgba(ACC, 0.24) : rgba(ACC, 0.06); b.fillRect(bx, ay, bw, bh); b.strokeStyle = on ? ACC : rgba(ACC, 0.25); b.lineWidth = 1; b.strokeRect(bx + 0.5, ay + 0.5, bw - 1, bh - 1); b.fillStyle = on ? HOT : DIM; b.textAlign = 'center'; b.fillText(ax, bx + bw / 2, ay + 14); b.textAlign = 'left'; });
-        for (const [zx, zl] of [[x + w - 114, '-'], [x + w - 90, '+']]) { b.fillStyle = rgba(ACC, 0.08); b.fillRect(zx, ay, 20, 20); b.strokeStyle = rgba(ACC, 0.25); b.strokeRect(zx + 0.5, ay + 0.5, 19, 19); b.fillStyle = TEXT; b.textAlign = 'center'; b.fillText(zl, zx + 10, ay + 14); b.textAlign = 'left'; } const rx = x + w - 64, rw = 50, rh = 20; b.fillStyle = rgba(ACC, 0.08); b.fillRect(rx, ay, rw, rh); b.strokeStyle = rgba(ACC, 0.25); b.strokeRect(rx + 0.5, ay + 0.5, rw - 1, rh - 1); b.fillStyle = TEXT; b.textAlign = 'center'; b.fillText('RST', rx + rw / 2, ay + 14); b.textAlign = 'left';
-        const sy = y + 254, sx = x + 92, sw = w - 146, effSpeed = paused ? 0 : speed, frac = clamp(effSpeed / 5, 0, 1);
-        b.fillStyle = paused || speed === 0 ? rgba(ACC, 0.24) : rgba(ACC, 0.08); b.fillRect(x + 14, sy - 4, 24, 18); b.strokeStyle = paused || speed === 0 ? ACC : rgba(ACC, 0.25); b.strokeRect(x + 14.5, sy - 3.5, 23, 17); b.fillStyle = paused || speed === 0 ? HOT : TEXT; b.textAlign = 'center'; b.fillText(paused || speed === 0 ? '▶' : '||', x + 26, sy + 9); b.textAlign = 'left';
-        barLeft = (this.ox + this.dx) + 92 * (this.k ?? 1); barW = sw * (this.k ?? 1);
-        b.fillStyle = dir < 0 ? rgba(ACC, 0.24) : rgba(ACC, 0.08); b.fillRect(x + 41, sy - 4, 22, 18); b.strokeStyle = dir < 0 ? ACC : rgba(ACC, 0.25); b.strokeRect(x + 41.5, sy - 3.5, 21, 17); b.fillStyle = dir < 0 ? HOT : TEXT; b.textAlign = 'center'; b.fillText(dir > 0 ? '↻' : '↺', x + 52, sy + 9); b.textAlign = 'left'; b.fillStyle = DIM; b.fillText('SPD', x + 68, sy + 9); b.fillStyle = rgba(ACC, 0.16); b.fillRect(sx, sy + 4, sw, 4); b.fillStyle = held ? tone('amber') : ACC; b.fillRect(sx, sy + 4, sw * frac, 4); b.fillStyle = HOT; b.fillRect(sx + sw * frac - 4, sy + 1, 8, 10); b.fillStyle = TEXT; b.fillText(held ? 'HOLD' : effSpeed === 0 ? 'PAUS' : `${effSpeed.toFixed(1)}x`, sx + sw + 8, sy + 9);
-      }, { title: smartTitle(m, 'model'), live: () => !!view3d && (held || dirty || (!paused && speed > 0)) });
-      c.more = () => { const ox = c.ox + c.dx, oy = c.oy + c.dy; return [{ rect: [ox + 12, oy + 30, w - 24, 212], kind: 'custom', id: 'orbit', part: m.part }, ...AXES.map((ax, idx) => ({ rect: [ox + 46 + idx * 35, oy + 248, 31, 20], kind: 'pick', id: `ax:${ax}`, part: m.part })), { rect: [ox + w - 114, oy + 248, 20, 20], kind: 'pick', id: 'zout', part: m.part }, { rect: [ox + w - 90, oy + 248, 20, 20], kind: 'pick', id: 'zin', part: m.part }, { rect: [ox + w - 64, oy + 248, 50, 20], kind: 'pick', id: 'rst', part: m.part }, { rect: [ox + 14, oy + 274, 24, 18], kind: 'pick', id: 'pause', part: m.part }, { rect: [ox + 41, oy + 274, 22, 18], kind: 'pick', id: 'dir', part: m.part }, { rect: [ox + 88, oy + 272, w - 136, 24], kind: 'custom', id: 'speed', part: m.part }]; };
-      c.pick = (id) => { if (id === 'pause') { if (paused || speed === 0) { paused = false; if (speed === 0) speed = 1; } else paused = true; lastReal = null; dirty = true; sfx('pip'); touch(0.5); } else if (id === 'zin') { zoom = clamp(zoom * 1.2, 0.35, 3.5); dirty = true; sfx('pip'); touch(0.5); } else if (id === 'zout') { zoom = clamp(zoom * 0.83, 0.35, 3.5); dirty = true; sfx('pip'); touch(0.5); } else if (id === 'dir') { dir = -dir; dirty = true; sfx('pip'); touch(0.5); } else if (id === 'rst') { rotM = m4init(); zoom = 1; panX = 0; panY = 0; axis = 'Y'; speed = 1; dir = 1; paused = false; lastReal = null; dirty = true; sfx('tick'); touch(0.5); } else if (String(id).startsWith('ax:')) { axis = String(id).slice(3); dirty = true; sfx('pip'); touch(0.5); } };
-      c.onWheel = (dy) => { zoom = clamp(zoom * (dy < 0 ? 1.14 : 0.88), 0.35, 3.5); dirty = true; touch(0.5); };
-      const setSpeedAt = (px) => { const v = Math.round(clamp((px - barLeft) / Math.max(10, barW), 0, 1) * 50) / 10; speed = v; paused = v === 0; lastReal = null; dirty = true; touch(0.5); };
-      c.onCustomDown = (id, px, py, btn, sh) => { if (id === 'orbit' && btn === 1) { c.pick('pause'); return; } if (id === 'orbit') { if (btn === 0 && !sh) { const lx = (px - (c.ox + c.dx)) / (c.k ?? 1) - 12, ly = (py - (c.oy + c.dy)) / (c.k ?? 1) - 32; const hitL = lastLabels.find((lb) => Math.abs(lx - (lb.x + 24)) < 42 && Math.abs(ly - (lb.y - 6)) < 14); if (hitL && Number.isFinite(hitL.wx) && Number.isFinite(hitL.wy)) { panX = clamp(-hitL.wx, -2.5, 2.5); panY = clamp(-hitL.wy, -2.5, 2.5); zoom = Math.max(zoom, 1.5); dirty = true; sfx('pip'); touch(0.5); return; } } held = true; panMode = btn === 2 || !!sh; lastPx = px; lastPy = py; dirty = true; touch(0.5); } else if (id === 'speed') { setSpeedAt(px); sfx('pip'); } };
-      c.onCustomMove = (id, px, py) => { if (id === 'orbit') { if (panMode) { const sc = 0.008 / Math.max(0.4, zoom); panX = clamp(panX + (px - lastPx) * sc, -2.5, 2.5); panY = clamp(panY - (py - lastPy) * sc, -2.5, 2.5); } else { const dx = (px - lastPx) * 0.015, dy = (py - lastPy) * 0.015; rotM = axis === 'Z' ? m4mul(m4rz(dx), rotM) : m4mul(m4rx(dy), m4mul(m4ry(dx), rotM)); } lastPx = px; lastPy = py; dirty = true; touch(0.5); } else if (id === 'speed') setSpeedAt(px); };
-      c.onCustomUp = (id) => { if (id === 'orbit') { held = false; panMode = false; lastReal = null; dirty = true; touch(0.5); } };
+      }, { title: smartTitle(m, 'model'), live: () => !!view3d && !reduced() });
       sfx('scan');
     },
     table: (m) => drawTable(m),
@@ -2301,17 +2253,21 @@
       pick(id) {
         const s = String(id);
         REM.until = Math.max(REM.until, now() + 8);
-        const rx = (REM.mark?.ox ?? 60) + (REM.mark?.dx ?? 0) + 14, ry = (REM.mark?.oy ?? 60) + (REM.mark?.dy ?? 0) + 40;
-        if (s === 'rem-add') { sfx('pip'); REM.until = Math.max(REM.until, now() + 30); openInlineEdit({ title: 'Add Reminder', placeholder: 'What to remember…', x: rx, y: ry, w: 280, onSave: (text) => R.ink.send?.({ type: 'rem_card', op: 'add', text }) }); }
-        else if (s.startsWith('rem-e:')) { const rid = s.slice(6), cur = [...(REM.today ?? []), ...(REM.later ?? [])].find((q) => String(q.id) === rid); sfx('pip'); REM.until = Math.max(REM.until, now() + 30); openInlineEdit({ title: 'Edit Reminder', value: cur?.text ?? '', x: rx, y: ry, w: 280, onSave: (text) => R.ink.send?.({ type: 'rem_card', op: 'edit', id: rid, text }) }); }
-        else if (s.startsWith('rem-x:')) { sfx('tick'); R.ink.send?.({ type: 'rem_card', op: 'remove', id: s.slice(6) }); }
+        if (s === 'rem-add') { sfx('pip'); R.ink.send?.({ type: 'rem_card', op: 'add' }); }
+        else if (s.startsWith('rem-e:')) { sfx('pip'); R.ink.send?.({ type: 'rem_card', op: 'edit', id: s.slice(7) }); }
+        else if (s.startsWith('rem-x:')) { sfx('tick'); R.ink.send?.({ type: 'rem_card', op: 'remove', id: s.slice(7) }); }
       },
       draw: remDraw,
       hits() {
-        if (this.ready) { b.fillStyle = this.hoverGrip ? HOT : rgba(ACC, 0.55); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(this.x + REM_W - 6 - j * 4, this.y + this.h - 14 + k * 4, 2, 2); }
-        const { x: cx, y: cy } = this;
-        return [...this.rows.filter((r) => r.i).map((r) => ({ rect: [cx, cy + r.y, REM_W, r.h], kind: 'tick', id: r.i.id, done: r.i.done, part: REM_PART })),
-          { rect: [cx + REM_W - 28, cy + this.h - 28, 28, 28], kind: 'resize', part: REM_PART }, { rect: [cx + REM_W - 28, cy + 2, 26, 22], kind: 'close', part: REM_PART }, { rect: [cx + REM_W - 56, cy + 2, 24, 22], kind: 'pin', part: REM_PART }, { rect: [cx, cy, REM_W - 58, 26], kind: 'drag', part: REM_PART }, { rect: [cx, cy, REM_W, this.h], kind: 'card', part: REM_PART }];
+        const { x: cx, y: cy } = this, rw = this.w ?? REM_W;
+        return [...this.rows.filter((r) => r.i).flatMap((r) => [
+            { rect: [cx + 8, cy + r.y - (this.sy || 0), 30, r.h], kind: 'tick', id: r.i.id, done: r.i.done, part: REM_PART },
+            { rect: [cx + 38, cy + r.y - (this.sy || 0), Math.max(20, rw - 72), r.h], kind: 'pick', id: 'rem-e:' + r.i.id, part: REM_PART },
+            { rect: [cx + rw - 32, cy + r.y - (this.sy || 0), 26, r.h], kind: 'pick', id: 'rem-x:' + r.i.id, part: REM_PART },
+          ]),
+          ...this.rows.filter((r) => r.addBtn).map((r) => ({ rect: [cx + 18, cy + r.y + 2 - (this.sy || 0), Math.round(textW('+ Add', CHIP()) + 30), 26], kind: 'pick', id: 'rem-add', part: REM_PART })),
+          { rect: [cx + rw - 28, cy + this.h - 28, 32, 32], kind: 'resize', part: REM_PART }, { rect: [cx - 4, cy + this.h - 28, 32, 32], kind: 'resize-l', part: REM_PART }, { rect: [cx + 28, cy + this.h - 6, Math.max(10, rw - 56), 20], kind: 'extend', part: REM_PART }, { rect: [cx + rw - 6, cy + 26, 20, Math.max(10, this.h - 54)], kind: 'extend-r', part: REM_PART }, { rect: [cx - 14, cy + 26, 20, Math.max(10, this.h - 32)], kind: 'extend-l', part: REM_PART }, { rect: [cx + 12, cy - 10, Math.max(10, rw - 24), 12], kind: 'extend-t', part: REM_PART },
+          { rect: [cx + rw - 28, cy + 2, 26, 22], kind: 'close', part: REM_PART }, { rect: [cx + rw - 54, cy + 2, 22, 22], kind: 'full', part: REM_PART }, { rect: [cx + rw - 82, cy + 2, 24, 22], kind: 'pin', part: REM_PART }, { rect: [cx + rw - 106, cy + 2, 22, 22], kind: 'save', part: REM_PART, title: 'reminders' }, { rect: [cx, cy, rw - 108, 26], kind: 'drag', part: REM_PART }, { rect: [cx, cy, rw, this.h], kind: 'card', part: REM_PART }];
       },
     });
     Object.assign(c, remLayout(x, y));
@@ -2409,12 +2365,11 @@
     const m = h?.m ?? null;
     if (hovered && hovered !== m) { hovered.hover = false; hovered.hoverClose = false; hovered.hoverFull = false; hovered.hoverSave = false; hovered.hoverPin = false; hovered.hoverGrip = false; hovered.hoverGripL = false; hovered.hoverId = null; hovered.setHover?.(false); }
     if (m) { m.hover = h.kind === 'button' || h.kind === 'link' || h.kind === 'clearall'; m.hoverClose = h.kind === 'close'; m.hoverFull = h.kind === 'full'; m.hoverSave = h.kind === 'save'; m.hoverPin = h.kind === 'pin'; m.hoverEdit = h.kind === 'edit'; m.hoverGrip = h.kind === 'resize'; m.hoverGripL = h.kind === 'resize-l'; m.hoverId = h.kind === 'tick' || h.kind === 'pick' ? h.id : null; m.setHover?.(h.kind === 'button'); }
-    if (hovered !== m && m?.onWheel) { try { window.focus(); } catch {} }
     if (hovered !== m || m) touch(0.2);
     hovered = m;
     document.documentElement.style.cursor = h && (h.kind === 'button' || h.kind === 'close' || h.kind === 'full' || h.kind === 'save' || h.kind === 'pin' || h.kind === 'edit' || h.kind === 'link' || h.kind === 'clearall' || h.kind === 'tick' || h.kind === 'pick') ? 'pointer' : h?.kind === 'drag' ? 'grab' : h?.kind === 'resize' ? 'nwse-resize' : h?.kind === 'resize-l' ? 'nesw-resize' : (h?.kind === 'extend' || h?.kind === 'extend-t') ? 'ns-resize' : (h?.kind === 'extend-r' || h?.kind === 'extend-l') ? 'ew-resize' : 'default';
   };
-  const ours = (e) => !!hitAt(e.clientX, e.clientY) || !!drag || !!sizing || !!customDrag;
+  const ours = (e) => !!hitAt(e.clientX, e.clientY) || !!drag || !!sizing;
   addEventListener('pointerdown', (e) => {
     const h = hitAt(e.clientX, e.clientY);
     if (!h) return;
@@ -2424,7 +2379,6 @@
     else if (h.kind === 'tick') { sfx(h.done ? 'tick' : 'pip'); REM.until = Math.max(REM.until, now() + 4); R.ink.send?.({ type: 'list_toggle', id: h.id }); }
     else if (h.kind === 'button') { h.m.down = now(); h.m.press?.(); sfx('pip'); touch(0.3); R.ink.send?.({ type: 'ink_action', part: h.part }); }
     else if (h.kind === 'link') { sfx('pip'); R.ink.send?.({ type: 'open_link', url: h.url }); }
-    else if (h.kind === 'custom') { customDrag = { m: h.m, id: h.id }; h.m.onCustomDown?.(h.id, e.clientX, e.clientY, e.button, e.shiftKey); touch(0.2); }
     else if (h.kind === 'pick') { h.m.pick?.(h.id); touch(1); }
     else if (h.kind === 'clearall') clearEverything();
     else if (h.kind === 'full') toggleFull(h.m);
@@ -2440,10 +2394,10 @@
     // comes to the front (cards move by their top bar). Not a quiz (a click between two options isn't "go away"),
     // and not the reminders card or a drawing that goes by itself, which still move by the body.
     else if (h.kind === 'card' && h.m.keep) return;
+    else if (h.kind === 'card') return;
     else if (h.kind === 'drag' || h.kind === 'card') { drag = { part: h.part, x: e.clientX, y: e.clientY, ms: partMarks(h.part), start: partMarks(h.part).map((m) => [m.dx, m.dy]) }; sfx('grab'); touch(); }
   }, true);
   addEventListener('pointermove', (e) => {
-    if (customDrag) { customDrag.m.onCustomMove?.(customDrag.id, e.clientX, e.clientY); return; }
     if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.ms.forEach((m, i) => { m.dx = drag.start[i][0] + dx; m.dy = drag.start[i][1] + dy; }); touch(0.2); return; }
     // Resizing: the corner follows the pointer, keeping the card's shape (it zooms from its top left).
     if (sizing) {
@@ -2458,20 +2412,15 @@
     }
     setHover(hitAt(e.clientX, e.clientY));
   }, true);
-  addEventListener('pointerup', (e) => { if (customDrag) { customDrag.m.onCustomUp?.(customDrag.id); customDrag = null; e.stopPropagation(); touch(0.2); return; } if (drag || sizing) { drag = null; sizing = null; e.stopPropagation(); touch(0.2); } }, true);
+  addEventListener('pointerup', (e) => { if (drag || sizing) { drag = null; sizing = null; e.stopPropagation(); touch(0.2); } }, true);
   addEventListener('wheel', (e) => {
     if (!ours(e)) return;
     e.stopPropagation();
     // Over a card too tall for the screen: scroll its insides.
     const m = hitAt(e.clientX, e.clientY)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && q.scrollMax > 0 && inside(markBox(q), e.clientX, e.clientY));
-    if (m?.onWheel) { e.preventDefault(); m.onWheel(e.deltaY); return; } if (m?.scrollMax > 0) { e.preventDefault(); m.sy = clamp((m.sy || 0) + e.deltaY, 0, m.scrollMax); touch(0.3); }
+    if (m?.scrollMax > 0) { e.preventDefault(); m.sy = clamp((m.sy || 0) + e.deltaY, 0, m.scrollMax); touch(0.3); }
   }, { capture: true, passive: false });
 
-  window.__roamieWheel = (x, y, dy) => {
-    const m = hitAt(x, y)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && (q.onWheel || q.scrollMax > 0) && inside(markBox(q), x, y));
-    if (m?.onWheel) { m.onWheel(dy); return; }
-    if (m?.scrollMax > 0) { m.sy = clamp((m.sy || 0) + dy, 0, m.scrollMax); touch(0.3); }
-  };
   // ---------------------------------------------------------------- the host's way in (host.js)
   R.inkHit = (x, y) => !!drag || !!sizing || !!hitAt(x, y);
   R.inkWheel = (x, y, dy) => { const m = hitAt(x, y)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && q.scrollMax > 0 && inside(markBox(q), x, y)); if (m?.scrollMax > 0) { m.sy = clamp((m.sy || 0) + dy, 0, m.scrollMax); touch(0.3); return true; } return false; };
@@ -2497,13 +2446,7 @@
     },
     // Another window came to the front, or that window moved or closed: the drawing no longer sits on what it was
     // about, so all of it fades (cards too).
-    stale() { fadeOut(marks.filter((m) => m.alive && m.screen && !m.local && !m.pinned), 0.6); },
-    wheel(x, y, dy) {
-      const m = hitAt(x, y)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && (q.onWheel || q.scrollMax > 0) && inside(markBox(q), x, y));
-      if (m?.onWheel) { m.onWheel(dy); return true; }
-      if (m?.scrollMax > 0) { m.sy = clamp((m.sy || 0) + dy, 0, m.scrollMax); touch(0.3); return true; }
-      return false;
-    },
+    stale() { stop(); fadeOut(marks.filter((m) => m.alive && !m.local && !m.pinned), 0.6); },
     click(x, y) { G.wait?.click(x, y); },
     ptr(x, y) { G.ptr = [x, y]; G.wait?.ptr(x, y); },
     // The reminders list from the sidecar: { today, later, seconds, flash, toggle }. seconds > 0 opens or extends it;
