@@ -441,9 +441,10 @@ export async function addCommitment(text, dueMs, kind = 'commitment', repeat = n
 
 /** repeat: a new rule, or null to stop repeating (it then stays as a one-off at its current time). Marking a
  *  repeating commitment done moves it on to its next time instead of closing it (`advanced` is set on the result). */
-export async function updateCommitment(id, { status, dueMs, repeat, keepSeries = false, now = Date.now() }) {
+export async function updateCommitment(id, { status, text, dueMs, repeat, keepSeries = false, checkOnly = false, now = Date.now() }) {
   const c = loadMemory().commitments.find((x) => x.id === id);
   if (!c) return null;
+  if (text !== undefined) c.text = String(text).trim().slice(0, 200);
   // A new time moves a repeating series to it, unless keepSeries: then only this time moves (a snooze), and after it
   // goes off the series carries on at its usual times.
   if (dueMs !== undefined) { c.due = dueMs; c.remindedAt = null; if (c.repeat && !keepSeries) c.repeatFrom = dueMs; }
@@ -453,7 +454,7 @@ export async function updateCommitment(id, { status, dueMs, repeat, keepSeries =
   }
   if (c.repeat && c.due == null) { delete c.repeat; delete c.repeatFrom; } // a series needs a time
   let advanced = false;
-  if (status === 'done' && c.repeat && c.status === 'open') advanced = advance(c, now);
+  if (status === 'done' && c.repeat && c.status === 'open' && !checkOnly) advanced = advance(c, now);
   if (advanced) { c.lastDoneAt = now; c.timesDone = (c.timesDone ?? 0) + 1; }
   if (status && !advanced) { c.status = status; if (status !== 'open') c.doneAt = now; else delete c.doneAt; }
   await saveMemory();

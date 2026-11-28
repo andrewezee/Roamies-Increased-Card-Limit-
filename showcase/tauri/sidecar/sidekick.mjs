@@ -2218,13 +2218,42 @@ const shortWhen = (ms, now = Date.now()) => {
 };
 function showList({ seconds = 0, flash = null, toggle = false } = {}) {
   const now = Date.now(), L = listItems(now);
-  const fmt = (i) => ({ id: i.id, text: i.text, done: i.done, overdue: i.overdue, when: i.due ? `${shortWhen(i.due, now)}${i.repeat ? ' ↻' : ''}` : '' });
+  const fmt = (i) => ({ id: i.id, text: i.text, done: i.done, overdue: i.overdue, due: i.due ?? null, repeat: i.repeat ?? null, when: i.due ? `${shortWhen(i.due, now)}${i.repeat ? ' ↻' : ''}` : '' });
   ui({ kind: 'list', today: L.today.map(fmt), later: L.later.map(fmt), seconds, flash, toggle });
+}
+async function onRemCard(m) {
+  const op = String(m.op ?? "");
+  if (op === "remove" && m.id) {
+    await updateCommitment(String(m.id), { status: "dropped" });
+    menu(); scheduleReminders(); showList({ seconds: 6 }); syncSoon();
+    return;
+  }
+  if ((op === "due" || op === "reset_today") && m.id) {
+    const target = listItems().today.concat(listItems().later).find((i) => i.id === String(m.id));
+    if (!target) return;
+    let nextDue = null;
+    if (op === "reset_today") { const b = new Date(), p = target.due ? new Date(target.due) : null; b.setHours(p ? p.getHours() : 9, p ? p.getMinutes() : 0, 0, 0); nextDue = b.getTime(); }
+    else if (m.dueMs === null) nextDue = null;
+    else if (typeof m.dueMs === "number" && Number.isFinite(m.dueMs)) nextDue = m.dueMs;
+    else if (typeof m.when === "string" && m.when.trim()) { const parsed = Date.parse(m.when.trim()); if (Number.isFinite(parsed)) nextDue = parsed; }
+    await updateCommitment(target.id, { dueMs: nextDue, status: "open" });
+    menu(); scheduleReminders(); showList({ flash: target.id, seconds: 6 }); syncSoon();
+    return;
+  }
+  const clean = String(m.text ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!clean) return;
+  if (op === "add") {
+    const c = await addCommitment(clean, null, "commitment");
+    menu(); scheduleReminders(); showList({ flash: c?.id, seconds: 6 }); syncSoon();
+  } else if (op === "edit" && m.id) {
+    await updateCommitment(String(m.id), { text: clean });
+    menu(); scheduleReminders(); showList({ flash: String(m.id), seconds: 6 }); syncSoon();
+  }
 }
 async function toggleItem(id) {
   const c = listItems().today.concat(listItems().later).find((i) => i.id === id);
   if (!c) return;
-  await updateCommitment(id, { status: c.done ? 'open' : 'done' });
+  await updateCommitment(id, { status: c.done ? 'open' : 'done', checkOnly: true });
   menu(); scheduleReminders(); showList({ flash: id, seconds: 4 });
 }
 // Finished items stay struck through for the rest of the day; at midnight they're deleted.
@@ -3035,6 +3064,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   // A link clicked on the research card: web and mail links only.
   else if (m.type === 'open_link') openLink(String(m.url ?? '')).catch((e) => console.error('open_link', e));
   else if (m.type === 'list_toggle') toggleItem(String(m.id)).catch((e) => console.error('list', e));
+  else if (m.type === 'rem_card') onRemCard(m).catch((e) => console.error('rem_card', e));
   else if (m.type === 'show_list') showList({ seconds: 20, toggle: true });
   // The overlay's drawing: a segment started, a wait for a click or hover ended, a card was closed, a button clicked.
   else if (m.type === 'draw_started') { ink.started(String(m.id), m.seg | 0); if (String(m.id) === showcase?.id) ob({ kind: 'showcase', phase: 'beat', beat: m.seg | 0 }); }
