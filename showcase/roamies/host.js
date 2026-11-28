@@ -12,6 +12,7 @@
   // The agents' corner (agent-home.js): Stop, Allow, file tiles and Open folder go to the sidecar.
   if (Roamie.agentHome) Roamie.agentHome.send = send;
   window.__roamieClick = (x, y) => Roamie.ink?.click(x, y);
+  window.__roamieWheel = (x, y, dy) => { if (Roamie.ink?.wheel?.(x, y, dy)) return; const el = document.elementFromPoint(x, y)?.closest('.nc-text'); if (el) el.scrollTop += dy; };
 
   window.__roamieSafe = (s) => Roamie.setSafe?.(s);
   // macOS: the voice helper can draw the cursor-form sidekick while it just follows the cursor (agent.js nativeStep,
@@ -44,6 +45,7 @@
   // grows into place there while a reply is spoken): look again a few times a second, or a click on it goes to the
   // app below until the mouse moves. Linux sends its click areas on a timer of its own (below).
   if (!LINUX) setInterval(() => { if (cursor && window.Roamie?.ptr) setHot(Roamie.ptr(cursor[0], cursor[1]) && !handsBusy && !Roamie.game); }, 120);
+  if (!LINUX) addEventListener('pointerup', () => { if (hot && !ask) setHot(false); }, true);
   // macOS: a fullscreen game is in front (fullscreen.rs). It holds the cursor, so every click is its own and the
   // Sidekick stops following the cursor (agent.js).
   window.__roamieGame = (on) => { if (!window.Roamie) return; Roamie.game = !!on; if (on) setHot(false); };
@@ -382,7 +384,10 @@
       case 'draw':
         endTalk();
         if (notchOn()) N().yieldTo('Showing you');
-        Roamie.ink?.play(e);
+        const p = Roamie.ink?.play(e);
+        const settleDraw = () => { if (notchOn() && !responding && !ask) N().done?.(); };
+        if (p && typeof p.finally === "function") p.finally(() => setTimeout(settleDraw, 600));
+        else setTimeout(settleDraw, 3200);
         break;
       case 'ink_clear': Roamie.ink?.clear(e); break;
       case 'ink_stale': Roamie.ink?.stale(); break;
@@ -490,7 +495,7 @@
       if (m.cancelled || !heardText) { waveTurn = false; if (notchOn() && !responding && !ask) N().close(); }
       // Heard, but no turn ever started (or it never ended): don't leave 'Thinking' up for good.
       // Only for this take: a newer one (talking again within the 20 s) keeps its capsule.
-      else if (notchOn()) { const take = listenTake; setTimeout(() => { if (take === listenTake && !responding && !ask && Roamie.notch?.active) N().close(); }, 20000); }
+      // kept open until manually closed
       heardText = false;
       listen?.close(); listen = null;
       if (heard) { const h = heard; setTimeout(() => { if (heard === h) { h.close(); heard = null; } }, 4000); }

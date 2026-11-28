@@ -305,6 +305,7 @@ const CHECKS = {
     (m.lines ?? []).forEach((l, k) => { known(l.from, `line ${k + 1}`); known(l.to, `line ${k + 1}`); if (l.from === l.to) out.push(`line ${k + 1} goes from "${l.from}" to itself.`); });
     (m.angles ?? []).forEach((a, k) => { for (const id of [a.at, a.from, a.to]) known(id, `angle ${k + 1}`); if (a.at === a.from || a.at === a.to || a.from === a.to) out.push(`angle ${k + 1}: at (its corner), from and to (a point on each arm) must be three different vertices.`); });
     (m.circles ?? []).forEach((c, k) => { known(c.at, `circle ${k + 1}`); if (!(c.r > 0)) out.push(`circle ${k + 1}: r must be above 0 (in the same units as the vertices).`); });
+    const linked = new Set((m.lines ?? []).flatMap((l) => [l.from, l.to])); for (const v of vs) if (!m.circles?.length && !linked.has(v.id)) out.push(`vertex "${v.id}" is not connected: list EVERY edge in lines ({from, to}) so all vertices connect.`);
     if (vs.every((v) => v.x === vs[0].x && v.y === vs[0].y)) out.push('every vertex is at the same place.');
     return out;
   },
@@ -468,6 +469,7 @@ export function createLists() {
       if (op === 'tick' && has) l.done[i] = !!done;
       else if (op === 'add' && t && l.items.length < LIST_MAX) { l.items.push(t); l.done.push(false); l.log.push(`added ${cut(t)}`); }
       else if (op === 'edit' && has && t && t !== l.items[i]) { l.log.push(`changed ${cut(l.items[i])} to ${cut(t)}`); l.items[i] = t; }
+      else if (op === 'remove' && has) { l.log.push(`removed ${cut(l.items[i])}`); l.items.splice(i, 1); l.done.splice(i, 1); l.base.splice(i, 1); }
       else return null;
       return [...l.items];
     },

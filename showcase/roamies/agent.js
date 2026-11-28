@@ -393,7 +393,7 @@
       const [x, y] = spot();
       k.appear(entrance(), x, y);
     };
-    const MAX_COLS = 38, MAX_LINES = 7, THINK_COLS = 28, THINK_LINES = 1, METER = 7;
+    const MAX_COLS = 64, MAX_LINES = 22, THINK_COLS = 28, THINK_LINES = 1, METER = 7;
     // Bubble text: Martian Mono (0.7 em per letter), sized to the bubble's line grid.
     const fontPx = (t) => Math.round(CH * t * 0.64 * 2) / 2;
     const colW = (t) => fontPx(t) * 0.7 + 0.35;
@@ -415,7 +415,7 @@
     const make = (kind) => ({
       kind, text: '', lines: [{ start: 0, s: '' }], shown: 0, at: [], ended: false, age: 0, wait: 0,
       x: sp(m.x - 40), y: sp(m.y - k.R * 2), w: sp(k.P * 6), h: sp(k.P * 4), pop: sp(0), cloud: sp(kind === 'thought' ? 1 : 0),
-      scroll: sp(0), follow: true, expanded: false, closing: 0, dwell: 0, hover: false, trail: 0, mood: null,
+      scroll: sp(0), follow: true, expanded: true, closing: 0, dwell: 0, hover: false, trail: 0, mood: null,
       tail: { x: sp(m.x), y: sp(m.y) }, below: false, closed: deferred(), revealed: deferred(), speed: kind === 'thought' ? 75 : 38,
     });
 
@@ -475,8 +475,8 @@
     const innerSize = (bb) => {
       const t = T();
       if (bb.kind === 'thought' && !bb.text) return { cols: 4, rows: 1, w: DOTS_W + 6, h: CH * t };
-      const maxCols = bb.kind === 'thought' ? THINK_COLS : bb.expanded ? Math.min(72, Math.floor((W - 80) / colW(t))) : MAX_COLS;
-      const maxRows = bb.kind === 'thought' ? THINK_LINES : bb.expanded ? Math.max(MAX_LINES, Math.floor((H * 0.62) / (CH * t))) : MAX_LINES;
+      const maxCols = bb.kind === 'thought' ? THINK_COLS : bb.expanded ? Math.min(96, Math.floor((W - 60) / colW(t))) : MAX_COLS;
+      const maxRows = bb.kind === 'thought' ? THINK_LINES : bb.expanded ? Math.max(MAX_LINES, Math.floor((H * 0.85) / (CH * t))) : MAX_LINES;
       if (bb.input) {
         const src = bb.text ? bb.lines : wrap(bb.input.placeholder || ' ', MAX_COLS);
         // A live transcript arrives in jumps, so its bubble is full width from the start and only grows down.
@@ -599,7 +599,7 @@
         if (!bb.hover && !bb.expanded && !R.voiceOut?.playing()) bb.dwell += dt;
         // Long enough to read, about 200 words a minute (#143: capped at 4.5 s, long replies closed mid-read).
         const linger = clamp(1.1 + bb.text.split(/\s+/).filter(Boolean).length / 3.3, 1.3, 30);
-        if (bb.kind === 'speech' && bb.dwell > linger) close(bb);
+        // kept open until manually closed
         if (bb.kind === 'thought' && bb.dwell > 0.4) close(bb);
       }
     };

@@ -13,7 +13,7 @@ import { ASK, BLOCK, checkDrawAction, checkFetch, checkOpen, checkRead, checkWri
 import { CARDS, DrawArgs, drawModelSchema, LIMITS, checkDraw, createLists, createParts, createPhotos, describeParts, faviconFor, pickTextMatch, quizNote, readSecs, resolveTargets, unjson } from './draw.mjs';
 import { plain } from './intro.mjs';
 import { linuxSession, seesPointer } from './platform.mjs';
-import { addCommitment, forgetFact, getCommitment, parseDue, parseRepeat, repeatLabel, updateCommitment } from './store.mjs';
+import { addCommitment, forgetFact, getCommitment, parseDue, parseRepeat, repeatLabel, updateCommitment , loadPlan, savePlan } from './store.mjs';
 import { snoozeTarget, snoozeUntil } from './snooze.mjs';
 import { addJob, getJob, jobsText, removeJob, updateJob } from './jobs.mjs';
 import { deleteSkill, fetchSkills, installSkill, listSkills, readSkill, readSkillFile, saveSkill, screenSkill, skillFiles } from './skills.mjs';
@@ -455,7 +455,7 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
 
   // ---------- drawing on screen (the draw tool) ----------
   // The overlay plays a drawing a beat at a time; each beat's places are looked up just before it's sent, so a
-  // walkthrough's next step is found on the screen as it is after the click. A drawing stays until it's cleared or the
+  // walkthrough's next step is found on the screen as it is after the click. ALWAYS prioritize calling draw with exact schema syntax for tables ({ kind: "table", title, columns: ["Col1", "Col2"], rows: [["val1", "val2"]] }), checklists ({ kind: "list", title, items: ["item 1", "item 2"] }), and structured notes ({ kind: "card", title, heading, text, items })—never output raw markdown tables in chat. A drawing stays until it's cleared or the
   // screen changes: a new drawing in a later request replaces it (unless it edits it), the front window switching,
   // moving or closing clears it, so does a click there that changes what it shows (a link, button, tab, menu item, a
   // double-click that opens something: the user's or the agent's own), the page or document in it changing (another
@@ -475,7 +475,7 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
   const pinned = new Set();
   const keepPinned = (id) => pinned.has(id);
   const forgetInk = () => { parts.clear(keepPinned); lists.clear(keepPinned); for (const m of [buttons, quizzes]) for (const id of [...m.keys()]) if (!pinned.has(id)) m.delete(id); for (const id of [...loose]) if (!pinned.has(id)) loose.delete(id); };
-  const windowBound = () => parts.ids.some((p) => !loose.has(p));
+  const windowBound = () => parts.ids.some((p) => !loose.has(p) && parts.get(p)?.screen);
   const ink = { waits: new Map(), turn: -1, active: 0, front: '', win: null, page: '', watch: null, checks: [], fresh: new Set() };
   const inkWait = (key, ms, signal) => new Promise((resolve) => {
     const done = (v) => { clearTimeout(t); signal?.removeEventListener('abort', stop); ink.waits.delete(key); resolve(v); };
@@ -514,9 +514,14 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
   };
   // The screen under the drawing changed: all of it fades (cards too), and the model is told nothing is there.
   function screenChanged(why) {
-    forgetInk(); ink.front = ''; ink.win = null; ink.page = ''; watchClicks(false);
     for (const t of ink.checks) clearTimeout(t);
     ink.checks = [];
+    if (why === 'click' || why === 'agent') {
+      clearScreenInk();
+      if (!windowBound()) { ink.front = ''; ink.win = null; ink.page = ''; watchClicks(false); }
+      return onInkGone(why);
+    }
+    forgetInk(); ink.front = ''; ink.win = null; ink.page = ''; watchClicks(false);
     ui({ kind: 'agent', e: { type: 'ink_stale' } });
     onInkGone(why);
   }
@@ -1018,7 +1023,7 @@ beats [{say, marks, wait?}]: say is one line under 20 words, and your reply afte
 Places (at, to, tie), best first: {text}: exact words on screen, in any text, image or canvas, even one character (case-sensitive); it scrolls there, target 'screen' searches every app, every: true marks each place it appears, within {x, y, w, h} keeps to one area. {id} from read_window, for controls without words. {x, y, w, h}: a thing's centre and size in pixels of your latest screenshot, for icons and shapes (a close guess is fitted to what's there).
 Screen: target (a control to click), ring (one thing to notice; r: corner radius), point (a small spot or icon), frame (a region), underline or strike (key or outdated words), check, cross, num (step order), label (text beside something; any mark takes label), connect (at → to; flow: true runs moving dots), trace (points: an odd-shaped group), scroll (dir), spotlight (one thing above all, sparingly), hover (with wait 'hover'), write (text, size: big words).
 Walkthroughs ("how do I…"): a beat per step, each a labelled target with wait 'click'; the next step is found after the click.
-Cards go beside the window. Each takes title, tie (what it explains) and card_size: small for an aside, large for something to read closely, full to fill the screen; normal by default:
+Cards go beside the window. Each MUST include a concise 2-4 word descriptive title derived from its contents (e.g. "GPU Comparison", "Morning Checklist", "Server Latency"—never generic "Table", "List", or "Answer"), tie (what it explains) and card_size: small for an aside, large for something to read closely, full to fill the screen; normal by default:
 card (heading, text, items, sources); note (text); clip (title, text); sources ([{name, url}]); legend (keys [{tone, text}]); list (title, items): a checklist; the user can tick items off, add items and edit them, and changes reach you with their next message (reminders go in remember_commitment instead); mindmap (title, branches [{text, items: up to 6, tone}], 2 to 8): a topic's parts, opened by clicking.
 photo (query: a thing with a Wikipedia page, or url; text: caption): the parts of a thing, named with labels [{text, x, y}] (0 to 1 from the top left) only after see_photo has shown you that same picture.
 bars (bars [{label, value, tone}], unit): how much, biggest. graph (x_range, y_range, plots [{points, tone, label}], dots [{x, y, label}]): a curve or change over time. timeline (events [{when, text}]): when, in what order. table (columns [headings], rows [[one cell per column]], up to ${LIMITS.columns} by ${LIMITS.rows}): comparing; the first column names each row, cells stay short, "yes" or "no" draws a tick or a cross.
@@ -1028,6 +1033,7 @@ math (steps [{tex, note}]): working, one LaTeX line a step (\\frac{a}{b}, \\sqrt
 molecule (smiles, label): a compound. model (title, parts [{shape: box|sphere|cylinder|cone|torus, at, size, rot [x,y,z] within -1 to 1, tone, label, motion}]): a physical thing or machine (a flow beside it only if it runs in stages); motion {do: spin|orbit|slide|pulse, axis, around, to, secs} shows it working: slide goes at → to and back, orbit circles "around", spin turns in place (a ball looks still), pulse swells.
 quiz (questions [{text, options: 2 to 4, answer: the right option word for word, explain}], up to ${LIMITS.questions}): "test me"; their score comes to you with their next message, so say a line and stop: never ask the questions in words too, or ask them for their answers or score.
 deep: true for "explain X in depth", "teach me how…", "walk me through…": one big card at a time, each replacing the last; 4 to 10 beats of a card each: the big picture, a stage per card, a short summary.
+Valid tones ONLY: accent, teal, amber, coral, lilac, sky, lime, red, white. Action buttons use {kind: "button", label, action: {do: "open"|"copy"|"ask", value}} (never put button inside target). Geometry requires >= 2 connected vertices in lines. Every card MUST have a 2-4 word title.
 Actions: type (text into the field at; needs actions allowed), copy (text), open (url), handoff (task), button (text, action {do: ask|open|copy, value}: a likely next step), emote (name: hype|wave|upset|remind|motivate), sfx (name). tone: accent, teal, amber, coral, lilac, sky, lime, red, white.
 A drawing stays until it's cleared, the window changes or the next one replaces it; keep: true keeps the cards up (screen marks still go) when adding to them or asked to. At most ${LIMITS.cardsShown} cards show at once (one more closes the oldest), so use the fewest. Each piece gets an id (p1, p2…); to change one: edit [{do: recolor|move|erase|clear, part, tone, dx, dy}] with no beats.${POINTER_OK ? '' : " On this desktop (Wayland) clicks and hovers in other apps can't be seen: never use wait; beats play one after another, so word each step to read well without pausing."}`,
       parameters: DrawArgs, modelSchema: drawModelSchema, executionMode: 'sequential', timeoutMs: 30 * 60_000,
@@ -1326,6 +1332,38 @@ A drawing stays until it's cleared, the window changes or the next one replaces 
     const r = await Promise.race([hands('locate', 'front').catch(() => null), new Promise((res) => setTimeout(() => res(null), 1500))]);
     const b = r?.window?.bounds;
     return Array.isArray(b) && b.length === 4 && b.every(Number.isFinite) ? b : null;
+  }
+  tools.push({
+    name: "plan_task",
+    description: "Break a complex or multi-step request into a hierarchical plan with subgoals and epistemic unknowns before acting, or update/clear the active plan. Set clear: true when the goal is finished.",
+    parameters: z.object({
+      goal: z.string().min(1).max(200).optional(),
+      subgoals: z.array(z.object({ id: z.string().max(16), text: z.string().max(160), status: z.enum(["pending", "active", "done"]) })).max(12).optional(),
+      unknowns: z.array(z.string().max(160)).max(8).optional(),
+      clear: z.boolean().optional(),
+    }),
+    execute: async ({ goal, subgoals, unknowns, clear }) => {
+      if (clear) { await savePlan(null); return "Active plan cleared."; }
+      const cur = loadPlan() ?? {};
+      const next = { goal: goal ?? cur.goal ?? "Task", subgoals: subgoals ?? cur.subgoals ?? [], unknowns: unknowns ?? cur.unknowns ?? [], updatedAt: Date.now() };
+      await savePlan(next);
+      return `Plan saved: ${next.goal} (${next.subgoals.filter((g) => g.status === "done").length}/${next.subgoals.length} done${next.unknowns.length ? `; ${next.unknowns.length} unknown(s) to resolve first` : ""}).`;
+    },
+  });
+  const ttlCache = new Map();
+  for (const t of tools) {
+    if ((t.name === "web_search" || t.name === "web_fetch") && typeof t.execute === "function") {
+      const orig = t.execute.bind(t);
+      t.execute = async (args, ctx) => {
+        const key = t.name + ":" + JSON.stringify(args ?? {});
+        const hit = ttlCache.get(key);
+        if (hit && hit.exp > Date.now()) return hit.val;
+        const val = await orig(args, ctx);
+        ttlCache.set(key, { val, exp: Date.now() + 15 * 60_000 });
+        if (ttlCache.size > 200) ttlCache.delete(ttlCache.keys().next().value);
+        return val;
+      };
+    }
   }
   return { tools, hands, whereNow, frontNow, frontBounds, ink: inkEvents, nextTurn: () => ++turn };
 }

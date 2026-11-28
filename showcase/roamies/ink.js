@@ -28,7 +28,7 @@
   const reducedMQ = matchMedia('(prefers-reduced-motion: reduce)');
   const reduced = () => reducedMQ.matches;
   const sleep = (ms) => new Promise((r) => setTimeout(r, reduced() ? Math.min(ms, 60) : ms));
-  const frame = () => new Promise((r) => requestAnimationFrame(r));
+  const frame = () => Promise.race([new Promise((r) => requestAnimationFrame(r)), sleep(35)]);
   // Global screen points → this overlay's px.
   const loc = (x, y) => [x - (R.origin?.x ?? 0), y - (R.origin?.y ?? 0)];
   const locRect = (r) => (r ? [...loc(r[0], r[1]), r[2], r[3]] : null);
@@ -189,7 +189,7 @@
     const t = now();
     for (let i = marks.length - 1; i >= 0; i--) if (!marks[i].alive) marks.splice(i, 1);
     if (!marks.length) { if (alloc) freeCanvas(); return; }
-    if (!alloc) allocate();
+    if (!alloc) allocate(); else if (view.style.visibility === "hidden") view.style.visibility = "";
     const full = t < until || !!drag || !!sizing || !lastU, live = full ? [] : marks.filter((m) => m.live?.(t));
     if (full) {
       let U = null;
@@ -643,7 +643,7 @@
       [x, y] = roomFor(Math.round(w * k), Math.round(h * k), m.part);
     }
     const bar = o.bar === false ? 0 : 26;
-    const c = add({ z: 2, part: m.part, card: true, kind: m.kind, cw: 0, ch: 0, p: 0, done: 0, w, h, ox: x, oy: y, k, deep, sy: 0, scrollMax: Math.max(0, full - h), color: tone(m.tone), live: o.live, box: () => [x - 4, y - 4, w + 8, h + 14],
+    const c = add({ z: 2, part: m.part, card: true, kind: m.kind, cw: 0, ch: 0, p: 0, done: 0, w, h, ox: x, oy: y, k, deep, sy: 0, scrollMax: Math.max(0, full - h), color: tone(m.tone), live: o.live, box: () => [x - 16, y - 4, w + 32, h + 22],
       draw(b, l, t) {
         if (this.cw < 4) return;
         chrome(b, x, y, this.cw, this.ch, { edge: o.edge ? colorOf(this, this.color) : ACC });
@@ -652,7 +652,8 @@
           b.fillStyle = 'rgba(120,255,226,0.06)'; b.fillRect(x + 2, y + 2, w - 4, bar - 2);
           b.fillStyle = DEEP; b.fillRect(x + 2, y + bar, w - 4, 1);
           [0, 1].forEach((k) => { b.fillStyle = k ? DEEP : ACC; b.fillRect(x + 12 + k * 12, y + 11, 5, 5); });
-          if (o.title) typed(b, ellipsize(String(o.title).toLowerCase(), w - 206, `500 10px ${MONO}`), x + w / 2, y + 17, `500 10px ${MONO}`, DIM, (t - this.done) / 0.4, { anchor: 'middle' });
+          if (o.title) { const rightPad = this.onEdit ? 134 : 110, tx = x + 36 + (w - 36 - rightPad) / 2; typed(b, ellipsize(String(o.title).toLowerCase(), Math.max(60, w - 40 - rightPad), `500 10px ${MONO}`), tx, y + 17, `500 10px ${MONO}`, DIM, (t - this.done) / 0.4, { anchor: 'middle' }); }
+          if (this.onEdit) { const ex = x + w - 118, ey = y + 13; b.fillStyle = this.hoverEdit ? HOT : DIM; b.fillRect(ex - 4, ey + 2, 2, 3); b.fillRect(ex - 2, ey, 3, 3); b.fillRect(ex + 1, ey - 3, 3, 3); b.fillRect(ex + 3, ey - 5, 2, 2); }
           // pin: a pixel pushpin with the full-screen and close buttons, drawn like them; pinned, it sits on a lit tile
           // (the filled-button look), so the state shows by shape as well as colour. The card stays until its ×.
           pinIcon(b, x + w - 70, y + 13, this);
@@ -679,11 +680,11 @@
           b.fillStyle = ACC; b.fillRect(x + w - 7, ty, 2, th);
         }
         // resize grip: three pixel steps in the bottom right corner
-        if (this.p >= 1 && !this.full) { b.fillStyle = this.hoverGrip ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + w - 6 - j * 4, y + h - 14 + k * 4, 2, 2); }
+        if (this.p >= 1 && !this.full) { b.fillStyle = this.hoverGrip ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + w - 6 - j * 4, y + h - 14 + k * 4, 2, 2); b.fillStyle = this.hoverGripL ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + 4 + j * 4, y + h - 14 + k * 4, 2, 2); }
       },
       hits() {
-        const out = bar ? [{ rect: [x + w - 28, y + 2, 26, 22], kind: 'close', part: m.part }, { rect: [x + w - 54, y + 2, 22, 22], kind: 'full', part: m.part }, { rect: [x + w - 82, y + 2, 24, 22], kind: 'pin', part: m.part }, { rect: [x + w - 106, y + 2, 22, 22], kind: 'save', part: m.part, title: o.title || m.kind }, { rect: [x, y, w - 108, bar], kind: 'drag', part: m.part }] : [{ rect: [x, y, w, Math.min(h, 24)], kind: 'drag', part: m.part }];
-        if (!this.full) out.unshift({ rect: [x + w - 18, y + h - 18, 18, 18], kind: 'resize', part: m.part });
+        const out = bar ? [{ rect: [x + w - 28, y + 2, 26, 22], kind: 'close', part: m.part }, { rect: [x + w - 54, y + 2, 22, 22], kind: 'full', part: m.part }, { rect: [x + w - 82, y + 2, 24, 22], kind: 'pin', part: m.part }, { rect: [x + w - 106, y + 2, 22, 22], kind: 'save', part: m.part, title: o.title || m.kind }, ...(this.onEdit ? [{ rect: [x + w - 130, y + 2, 22, 22], kind: 'edit', part: m.part }] : []), { rect: [x, y, w - (this.onEdit ? 132 : 108), bar], kind: 'drag', part: m.part }] : [{ rect: [x, y, w, Math.min(h, 24)], kind: 'drag', part: m.part }];
+        if (!this.full) out.unshift({ rect: [x + w - 28, y + h - 28, 32, 32], kind: 'resize', part: m.part }, { rect: [x - 4, y + h - 28, 32, 32], kind: 'resize-l', part: m.part }, { rect: [x + 28, y + h - 6, Math.max(10, w - 56), 20], kind: 'extend', part: m.part }, { rect: [x + w - 6, y + bar, 20, Math.max(10, h - bar - 28)], kind: 'extend-r', part: m.part }, { rect: [x - 14, y + bar, 20, Math.max(10, h - bar - 28)], kind: 'extend-l', part: m.part }, { rect: [x + 12, y - 10, Math.max(10, w - 24), 12], kind: 'extend-t', part: m.part });
         // Links scrolled out of view can't be clicked.
         const more = (this.more?.() ?? []).filter((q) => q.rect[1] >= y + bar && q.rect[1] + q.rect[3] <= y + h);
         return [...more, ...out, { rect: [x, y, w, h], kind: 'card', part: m.part }];
@@ -692,12 +693,14 @@
     // Taller insides (a list that got an item): the card grows, up to the screen's height and then it scrolls, and moves
     // up if it would run off the bottom.
     c.grow = (nh) => {
-      full = nh; h = Math.min(nh, maxCardH()); c.h = h; c.scrollMax = Math.max(0, full - h); c.sy = Math.min(c.sy, c.scrollMax);
+      full = nh; h = c.userH != null ? Math.min(c.userH, Math.max(full, maxCardH())) : Math.min(nh, maxCardH()); c.h = h; c.scrollMax = Math.max(0, full - h); c.sy = Math.min(c.sy, c.scrollMax);
       if (c.p >= 1) c.ch = h;
       const S = scr(), kk = c.k ?? 1, over = y + c.dy + h * kk + 64 - S[3];
       if (over > 0 && !c.full) c.dy -= Math.min(over, Math.max(0, y + c.dy - S[1] - 4));
       touch(1.2);
     };
+    c.extend = (nh) => { h = clamp(nh, Math.min(90, full), Math.max(full, maxCardH())); c.userH = h; c.h = h; c.scrollMax = Math.max(0, full - h); c.sy = Math.min(c.sy, c.scrollMax); if (c.p >= 1) c.ch = h; touch(0.2); };
+    c.extendW = (nw, shiftX = 0) => { const old = w; w = clamp(nw, 210, Math.max(480, scr()[2] - scr()[0] - 24)); const dw = w - old; if (shiftX) c.dx -= dw * (c.k ?? 1); c.w = w; if (c.p >= 1) c.cw = w; touch(0.2); };
     await fly(x, y); sfx('expand');
     await tween(0.45, (u) => { const e = ease(u); c.cw = w * e; c.ch = h * e; penApi()?.set?.(x + c.cw * k, y + c.ch * k); });
     c.p = 1; c.done = now(); touch(1.5); syncClearAll();
@@ -725,6 +728,23 @@
     return hits;
   }
   const loadIcons = (list) => (list ?? []).map((s) => { const o = { ...s }; if (s.icon) { o.img = new Image(); o.img.onload = () => touch(); o.img.src = s.icon; } return o; });
+  const GENERIC_TITLES = new Set(["answer", "table", "list", "card", "note", "graph", "bars", "timeline", "flow", "math", "figure", "map", "quiz", "model", "results", "summary", "info"]);
+  function smartTitle(m, fallback) {
+    const raw = String(m?.title ?? "").trim();
+    if (raw && !GENERIC_TITLES.has(raw.toLowerCase())) return raw;
+    const snip = (v) => String(v ?? "").replace(/[#*_`]+/g, "").trim().split(/\s+/).slice(0, 4).join(" ");
+    if (m?.heading) return snip(m.heading);
+    if (Array.isArray(m?.columns) && m.columns.length) return snip(m.columns.slice(0, 2).join(" vs "));
+    if (Array.isArray(m?.items) && m.items.length) return snip(typeof m.items === "string" ? m.items : m.items?.text);
+    if (Array.isArray(m?.bars) && m.bars.length) return snip(m.bars.map((b) => b.label).slice(0, 2).join(" & "));
+    if (Array.isArray(m?.nodes) && m.nodes.length) return snip(m.nodes?.text);
+    if (Array.isArray(m?.events) && m.events.length) return snip(m.events?.text);
+    if (Array.isArray(m?.plots) && m.plots?.label) return snip(m.plots.label);
+    if (m?.region) return snip(m.region);
+    if (m?.label) return snip(m.label);
+    if (m?.text) return snip(m.text);
+    return raw || fallback;
+  }
   const CARDS_DRAW = {
     async card(m) {
       const HEAD = `800 22px ${DOTO}`, srcs = loadIcons(m.sources);
@@ -737,23 +757,26 @@
       };
       let L = lay(340);
       for (const wide of [440, 560]) if (L.h > maxCardH()) L = lay(wide);
-      const { w, heads, head, rows, items, h } = L, gap = rows.length && items.length ? 10 : 0;
-      const ticks = items.map((_, i) => handLine([0, 0], [8, 0], { jitter: 0.3 }));
+      let curW = L.w;
+      const ticks = (m.items ?? []).map((_, i) => handLine([0, 0], [8, 0], { jitter: 0.3 }));
       let hits = [];
-      const c = await card(m, w, h, function (b, l, t, x, y, age) {
+      const c = await card(m, L.w, L.h, function (b, l, t, x, y, age) {
+        if (this.w && Math.abs(this.w - curW) > 1) { curW = this.w; L = lay(curW); this.grow?.(L.h); }
+        const w = this.w || L.w, h = this.h || L.h, { heads, head, rows, items } = L, gap = rows.length && items.length ? 10 : 0;
         let yy = y + 18;
         heads.forEach((r, i) => typed(b, r, x + 20, yy + 18 + i * 26, HEAD, TEXT, (age - i * 0.3) / 0.6)); yy += head;
         wrapped(b, rows, x + 20, yy + 6, 19, BODY, TEXT, (age - 0.2) / (0.4 + rows.join(' ').length * 0.012)); yy += rows.length * 19 + gap;
         items.forEach((r, i) => { const a = age - 0.4 - i * 0.25; if (a <= 0) return; pen(b, l, this, ticks[i].map(([px, py]) => [px + x + 24, py + yy + 1]), clamp(a / 0.2, 0, 1), this.color, { key: 'k' + i, w: 2.6 }); wrapped(b, r, x + 40, yy + 6, 19, BODY, TEXT, a / 0.5); yy += r.length * 19 + 6; });
         if (srcs.length) hits = sourcesRow(b, srcs, x + 20, y + h - 26 - 18, w - 40, age - 0.6);
-      }, { title: m.title || 'answer' });
+      }, { title: smartTitle(m, 'answer') });
       c.more = () => hits.map((q) => ({ ...q, part: m.part }));
     },
     async note(m) {
       // All of it; a long note goes wider rather than very tall.
       const narrow = wrapRows(m.text, 210 - 28, `500 13px ${MONO}`), w = narrow.length > 12 ? 320 : 210;
-      const rows = w === 210 ? narrow : wrapRows(m.text, w - 28, `500 13px ${MONO}`), h = 40 + rows.length * 19;
-      await card(m, w, h, function (b, l, t, x, y, age) { b.fillStyle = colorOf(this, this.color); b.fillRect(x + 8, y + 8, w - 16, 3); wrapped(b, rows, x + 14, y + 32, 19, `500 13px ${MONO}`, TEXT, age / (0.3 + m.text.length * 0.025)); }, { bar: false, edge: true });
+      let curW = w, rows = w === 210 ? narrow : wrapRows(m.text, w - 28, `500 13px ${MONO}`);
+      const h = 58 + rows.length * 19;
+      await card(m, w, h, function (b, l, t, x, y, age) { const cw = this.w || w; if (Math.abs(cw - curW) > 1) { curW = cw; rows = wrapRows(m.text, cw - 28, `500 13px ${MONO}`); this.grow?.(58 + rows.length * 19); } b.fillStyle = colorOf(this, this.color); b.fillRect(x + 8, y + 30, cw - 16, 3); wrapped(b, rows, x + 14, y + 50, 19, `500 13px ${MONO}`, TEXT, age / (0.3 + m.text.length * 0.025)); }, { title: smartTitle(m, "note"), edge: true });
       sfx('page');
     },
     // A mind map: the topic on the left, its branches beside it, each branch's points behind a +. A click on a branch
@@ -841,16 +864,17 @@
     // A checklist: a click on a ring ticks an item off (or back), on its words edits it, and "+ Add" adds one. The
     // sidecar asks for the words and hears every change (list_card), and sends the new items back (listItems).
     async list(m) {
-      const TITLE = `800 20px ${DOTO}`, S = { items: m.items.map(String), done: m.items.map(() => false), born: [], ver: m.items.map(() => 0), down: 0 };
+      const normItems = (Array.isArray(m.items) ? m.items : []).map((it) => typeof it === 'string' ? it : String(it?.text ?? it?.label ?? it ?? ''));
+      S = { items: normItems, done: normItems.map(() => false), born: [], ver: normItems.map(() => 0), down: 0 };
       const ticked = new Map(), ink = new Map();
       // The whole title and every point in full: 280 wide, wider while a point runs past three lines or it's too tall.
       const lay = (w) => {
-        const title = wrapRows(m.title || 'list', w - 36, TITLE), items = S.items.map((it) => wrapRows(it, w - 58, BODY)), tops = [];
-        let yy = 50 + (title.length - 1) * 24; for (const r of items) { tops.push(yy); yy += r.length * 19 + 11; }
-        return { w, title, items, tops, addY: yy + 2, h: 26 + yy + 2 + 26 + 14 };
+        const title = wrapRows(m.title || 'list', w - 40, HEAD), items = S.items.map((it) => wrapRows(it, w - 78, BODY)), tops = [];
+        let yy = 18 + title.length * 26 + 8; for (const r of items) { tops.push(yy); yy += r.length * 19 + 11; }
+        return { w, title, items, tops, addY: yy + 4, h: 26 + yy + 4 + 28 + 18 };
       };
-      let L = lay(280);
-      for (const wide of [360, 440]) if (L.h > maxCardH() || L.items.some((r) => r.length > 3)) L = lay(wide);
+      let L = lay(340);
+      for (const wide of [400, 480]) if (L.h > maxCardH() || L.items.some((r) => r.length > 3)) L = lay(wide);
       // Each item's ring, tick and strike-through, made once (and again when its words change) so the ink holds still.
       const shapes = (i) => {
         const key = `${i}.${S.ver[i]}`;
@@ -858,15 +882,16 @@
           strikes: L.items[i].map((ln) => handLine([0, 0], [textW(ln, BODY) + 4, 0], { jitter: 0.6 })) });
         return [key, ink.get(key)];
       };
-      let hits = [];
+      let hits = [], curW = L.w;
       const c = await card(m, L.w, L.h, function (b, l, t, x, y, age) {
+        if (this.w && Math.abs(this.w - curW) > 1) { curW = this.w; L = lay(curW); ink.clear(); this.__ol = {}; this.__at = {}; this.grow?.(L.h); }
         hits = [];
-        const { w, title, items, tops } = L;
-        title.forEach((r, i) => typed(b, r, x + 18, y + 30 + i * 24, TITLE, TEXT, (age - i * 0.2) / 0.4));
+        const w = this.w || L.w, { title, items, tops } = L;
+        title.forEach((r, i) => typed(b, r, x + 20, y + 36 + i * 26, HEAD, TEXT, (age - i * 0.2) / 0.4));
         items.forEach((r, i) => {
           const a = S.born[i] != null ? t - S.born[i] : age - 0.3 - i * 0.26;
           if (a <= 0) return;
-          const top = y + tops[i], rh = r.length * 19, done = S.done[i], [key, sh] = shapes(i), tick = `t${i}`, edit = `e${i}`;
+          const top = y + tops[i], rh = r.length * 19, done = S.done[i], [key, sh] = shapes(i), tick = `t${i}`, edit = `e${i}`, del = `x${i}`;
           if (this.hoverId === tick || this.hoverId === edit) { b.fillStyle = rgba(ACC, 0.07); b.fillRect(this.hoverId === tick ? x + 8 : x + 34, top - 5, this.hoverId === tick ? 30 : w - 42, rh + 6); }
           pen(b, l, this, placed(this, `r${key}`, sh.ring, x + 18, top), clamp(a / 0.3, 0, 1), done ? MID : this.color, { key: `r${key}`, w: 2.4 });
           wrapped(b, r, x + 40, top + 11, 19, BODY, done ? DIM : TEXT, a / 0.4);
@@ -875,21 +900,22 @@
             pen(b, l, this, placed(this, `c${key}`, sh.check, x + 18, top), clamp(u / 0.2, 0, 1), HOT, { key: `c${key}`, w: 2.2 });
             sh.strikes.forEach((st, k) => pen(b, l, this, placed(this, `s${key}.${k}`, st, x + 38, top + 6 + k * 19), clamp((u - 0.1 - k * 0.2) / 0.3, 0, 1), MID, { key: `s${key}.${k}`, w: 1.8 }));
           }
-          hits.push({ rect: [x + 8, top - 5, 30, rh + 6], kind: 'pick', id: tick }, { rect: [x + 38, top - 5, w - 46, rh + 6], kind: 'pick', id: edit });
+          { const rx = x + w - 23, ry = top + 6; b.fillStyle = this.hoverId === del ? HOT : DIM; for (let k = -2; k <= 2; k++) { b.fillRect(rx + k - 1, ry + k - 1, 2, 2); b.fillRect(rx + k - 1, ry - k - 1, 2, 2); } } hits.push({ rect: [x + 8, top - 5, 30, rh + 6], kind: 'pick', id: tick }, { rect: [x + 38, top - 5, Math.max(20, w - 74), rh + 6], kind: 'pick', id: edit }, { rect: [x + w - 34, top - 5, 24, rh + 6], kind: 'pick', id: del });
         });
         const a = age - 0.3 - S.items.length * 0.26, bw = Math.round(textW('+ Add', CHIP()) + 30), br = [x + 18, y + L.addY, bw, 26];
         if (a <= 0) return;
         chip(b, br[0], br[1], br[2], br[3], '+ Add', a, { hover: this.hoverId === 'add', down: now() - S.down < 0.15 });
         hits.push({ rect: br, kind: 'pick', id: 'add' });
-      }, { title: 'list' });
+      }, { title: smartTitle(m, 'list') });
       c.more = () => hits.map((q) => ({ ...q, part: m.part }));
       c.keep = true;
+      c.onEdit = () => c.pick('add');
       c.pick = (id) => {
         const send = (o) => R.ink.send?.({ type: 'list_card', part: m.part, ...o });
         if (id === 'add') { S.down = now(); sfx('pip'); send({ op: 'add' }); return; }
         const i = Number(String(id).slice(1));
         if (!(i >= 0 && i < S.items.length)) return;
-        if (id[0] === 'e') { sfx('pip'); send({ op: 'edit', i }); return; }
+        if (id[0] === 'e') { sfx('pip'); send({ op: 'edit', i }); return; } if (id[0] === 'x') { sfx('tick'); S.items.splice(i, 1); S.done.splice(i, 1); S.born.splice(i, 1); S.ver.splice(i, 1); ink.clear(); L = lay(c.w || L.w); c.__ol = {}; c.__at = {}; c.grow(L.h); send({ op: 'remove', i }); return; }
         S.done[i] = !S.done[i];
         if (S.done[i]) { ticked.set(i, now()); sfx('done'); } else { ticked.delete(i); sfx('tick'); }
         send({ op: 'tick', i, done: S.done[i] });
@@ -898,6 +924,7 @@
       // The sidecar's items after an add or an edit: new ones are written in, changed ones get fresh ink.
       lists.set(m.part, (items) => {
         if (!c.alive) { lists.delete(m.part); return; }
+        items = (Array.isArray(items) ? items : []).map((it) => typeof it === 'string' ? it : String(it?.text ?? it?.label ?? it ?? ''));
         items.forEach((it, i) => {
           if (i >= S.items.length) { S.born[i] = now(); S.done[i] = false; S.ver[i] = 0; sfx('pip'); } else if (it !== S.items[i]) S.ver[i]++;
         });
@@ -1024,7 +1051,7 @@
         plots.forEach((p, i) => pen(b, l, this, O.plots[i], p.p, tone(p.tone), { key: 'p' + i }));
         dots.forEach((d, i) => { pen(b, l, this, O.dots[i], d.p, HOT, { key: 'd' + i, w: 2.6 }); if (d.p >= 1 && d.label) { const lab = ellipsize(d.label, w - 40, SMALL), lx = Math.min(x + sx(d.x) + 9, x + w - 12 - textW(lab, SMALL)); typed(b, lab, lx, y + sy(d.y) - 8, SMALL, TEXT, 1); } });
         keys.forEach(([tn, words], i) => { const [kx, kr] = kAt[i], ky = y + gy0 + gh + 38 + kr * 18; b.fillStyle = tone(tn); b.beginPath(); b.arc(x + kx + 4, ky, 4, 0, Math.PI * 2); b.fill(); typed(b, words, x + kx + 14, ky + 4, SMALL, DIM, 1); });
-      }, { title: m.title || 'graph' });
+      }, { title: smartTitle(m, 'graph') });
       const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
       await trace(axes.map(([px, py]) => [px + x, py + y]), 0.7, (e) => (ax = e));
       for (const p of plots) await trace(p.pts.map(([px, py]) => [px + x, py + y]), 1.2, (e) => (p.p = e));
@@ -1062,7 +1089,7 @@
           typed(b, e.when, inCard(e.when, when), y + ty + (up ? -18 : 34), when, TEXT, a / 0.3, { anchor: 'middle' });
           rows.forEach((r, k) => typed(b, r, inCol(r), y + ty + (up ? -36 - (n - 1 - k) * 13 : 50 + k * 13), SMALL, DIM, (a - 0.1 - k * 0.1) / 0.4, { anchor: 'middle' }));
         });
-      }, { title: m.title || 'timeline' });
+      }, { title: smartTitle(m, 'timeline') });
       const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
       await trace(line.map(([px, py]) => [px + x, py + y]), 0.8, (e) => (lp = e));
       for (let i = 0; i < ev.length; i++) { await tap(x + xs[i], y + ty); sfx('blip'); shown[i] = now(); touch(); await sleep(150); }
@@ -1076,7 +1103,7 @@
         for (let i = 0; i < f.lv.length; i++) { const v = f.lv[i]; if (!v) continue; const gx = i % f.gw, gy = (i / f.gw) | 0; if ((B4[(gy % 4) * 4 + (gx % 4)] + 0.5) / 16 > u * 1.05) continue; b.fillStyle = LED[v]; b.fillRect(x + 12 + gx * 3, y + 6 + gy * 3, 3, 3); }
         // Labels follow their parts as it turns; one that would land on another this frame waits its turn.
         if (u >= 1) { const took = []; for (const lab of f.labels) { const lx = x + 12 + lab.x, ly = y + 6 + lab.y, r = [lx - 2, ly - 14, textW(lab.text, `600 10px ${MONO}`) + 10, 16]; if (took.some((q) => overlap(q, r) > 0)) continue; took.push(r); b.fillStyle = ACC; b.fillRect(lx - 1.5, ly - 1.5, 3, 3); typed(b, lab.text, lx + 6, ly - 4, `600 10px ${MONO}`, TEXT, 1, { rim: 3 }); } }
-      }, { title: m.title || m.label || 'model', live: () => !!view3d && !reduced() });
+      }, { title: smartTitle(m, 'model'), live: () => !!view3d && !reduced() });
       sfx('scan');
     },
     table: (m) => drawTable(m),
@@ -1258,7 +1285,7 @@
       const room = maxW - 2 * EDGE_X - n * 2 * PX;
       let cap = Math.max(...natural);
       while (cap > 56 && natural.reduce((a, v) => a + Math.min(v, cap), 0) > room) cap -= 4;
-      const ws = natural.map((v) => Math.min(v, cap)), xs = [];
+      const baseWs = natural.map((v) => Math.min(v, cap)), sumBase = baseWs.reduce((a, b) => a + b, 0) || 1, extra = Math.max(0, room - sumBase), ws = baseWs.map((v) => v + Math.floor(extra * (v / sumBase))), xs = [];
       let cx = EDGE_X + PX; for (const cw of ws) { xs.push(cx); cx += cw + 2 * PX; }
       const heads = cols.map((h, ci) => wrapRows(h.toUpperCase(), ws[ci], TH)), headH = Math.max(...heads.map((r) => r.length)) * 13 + 14;
       const rows = m.rows.map((r) => r.map((v, ci) => (yn(v) ? { yn: yn(v), rows: [''] } : { rows: wrapRows(v, ws[ci], font(ci)) })));
@@ -1267,9 +1294,11 @@
     };
     let L = lay(460);
     for (const wide of [600, 760]) if (L.h > maxCardH() || L.deep > 3) L = lay(Math.min(wide, scr()[2] - scr()[0] - 40));
-    const { w, xs, heads, headH, rows, rowH, h } = L;
-    const glyphs = rows.map((r) => r.map((cell) => (cell.yn > 0 ? [tickPts()] : cell.yn < 0 ? crossPts() : null)));
-    await card(m, w, h, function (b, l, t, x, y, age) {
+    let curW = L.w;
+    const glyphs = L.rows.map((r) => r.map((cell) => (cell.yn > 0 ? [tickPts()] : cell.yn < 0 ? crossPts() : null)));
+    const tc = await card(m, L.w, L.h, function (b, l, t, x, y, age) {
+      if (this.w && Math.abs(this.w - curW) > 1) { curW = this.w; L = lay(curW); this.grow?.(L.h); }
+      const w = this.w || L.w, { xs, heads, headH, rows, rowH } = L;
       let yy = y + 6;
       heads.forEach((r, ci) => r.forEach((line, k) => typed(b, line, x + xs[ci], yy + 15 + k * 13, TH, DIM, age / 0.3)));
       yy += headH;
@@ -1277,15 +1306,15 @@
       rows.forEach((cells, ri) => {
         const a = age - 0.2 - ri * 0.09;
         if (a > 0) cells.forEach((cell, ci) => {
-          // yes and no as a tick and a cross: told apart by shape, not only by colour.
           if (cell.yn) glyphs[ri][ci].forEach((pts, k) => pen(b, l, this, placed(this, `g${ri}.${ci}.${k}`, pts, x + xs[ci], Math.round(yy + rowH[ri] / 2 - 5)), strokeAt(a - k * 0.12, 0.2), tone(cell.yn > 0 ? 'lime' : 'coral'), { key: `g${ri}.${ci}.${k}`, w: 2.6 }));
           else wrapped(b, cell.rows, x + xs[ci], yy + 6 + 12, LH, font(ci), TEXT, a / 0.3);
         });
         yy += rowH[ri];
         if (ri < rows.length - 1) { b.fillStyle = DEEP; b.fillRect(x + EDGE_X, yy - 1, w - 2 * EDGE_X, 1); }
       });
-    }, { title: m.title || 'table' });
-    sfx('page'); touch(0.6 + rows.length * 0.1);
+    }, { title: smartTitle(m, 'table') });
+    tc.onEdit = () => { const v = window.prompt('Edit cell (e.g. 1,2=New Value) or add row (col1, col2):'); if (!v) return; const eq = v.match(/^(\d+)\s*,\s*(\d+)\s*=\s*(.+)$/); if (eq) { const ri = Number(eq[1]) - 1, ci = Number(eq[2]) - 1; if (m.rows[ri] && ci >= 0 && ci < m.columns.length) m.rows[ri][ci] = eq[3].trim(); } else { const parts = v.split(',').map((p) => p.trim()); while (parts.length < m.columns.length) parts.push(''); m.rows.push(parts.slice(0, m.columns.length)); } curW = 0; tc.__ol = {}; tc.__at = {}; touch(0.5); };
+    sfx('page'); touch(0.6 + L.rows.length * 0.1);
   }
   // Whole numbers with thousands separators, a couple of decimals for small ones, M and B for the very big.
   const fmtValue = (v) => (Math.abs(v) >= 1e9 ? `${+(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e6 ? `${+(v / 1e6).toFixed(2)}M` : v.toLocaleString('en-US', { maximumFractionDigits: Math.abs(v) < 100 ? 2 : 1 }));
@@ -1310,7 +1339,7 @@
         b.fillStyle = 'rgba(255,255,255,0.45)'; b.fillRect(x + x0, mid - BH / 2, bw, 1.5); b.fillStyle = 'rgba(3,39,34,0.3)'; b.fillRect(x + x0, mid + BH / 2 - 1.5, bw, 1.5);
         if (u >= 1) typed(b, vals[i], x + x0 + full + 8, mid + 4, TD1, TEXT, (a - 0.5) / 0.25);
       });
-    }, { title: m.title || 'bars' });
+    }, { title: smartTitle(m, 'bars') });
     const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
     await trace(axis.map(([px, py]) => [px + x, py + y]), 0.4, (e) => (ax = e));
     sfx('blip'); touch(1 + bars.length * 0.08);
@@ -1434,7 +1463,7 @@
         if (q.flow) { const gap = q.len / Math.max(1, Math.round(q.len / 46)), d0 = reduced() ? gap / 2 : (t * 60) % gap; l.fillStyle = HOT; for (let d = d0; d < q.len; d += gap) { const [px, py] = at(q.pts, d / q.len); l.fillRect(Math.round(x + ox + px) - 2, Math.round(y + py) - 2, 4, 4); } }
       });
       for (const nd of L.nodes) { const s0 = shown.get(nd.id); if (s0 != null) flowNode(b, nd, x + ox, y, t - s0); }
-    }, { title: m.title || 'flow', live: () => moving && !reduced() && born.some((v) => v != null) });
+    }, { title: smartTitle(m, 'flow'), live: () => moving && !reduced() && born.some((v) => v != null) });
     const [x, y] = [markBox(c)[0] + 4 + ox, markBox(c)[1] + 4 + 26];
     const show = (id) => { if (!shown.has(id)) { shown.set(id, now()); touch(0.5); } };
     for (const nd of L.nodes) if (nd.layer === 0) show(nd.id);
@@ -1578,7 +1607,7 @@
         }
         if (born[i] != null) st.note.forEach((r, k) => typed(b, r, x0, y + st.noteY + k * NLH, SMALL, DIM, (t - born[i] - k * 0.1) / 0.35));
       });
-    }, { title: m.title || 'math' });
+    }, { title: smartTitle(m, 'math') });
     const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
     // One step at a time, a breath between them, so each can be followed.
     for (const [i, st] of steps.entries()) {
@@ -1666,7 +1695,7 @@
         l.fillStyle = HOT; l.fillRect(Math.round(x + p[0]) - 2, Math.round(y + p[1]) - 2, 4, 4);
         typed(b, v.id, x + n[0], y + n[1] + 4, LAB, TEXT, (t - s0) / 0.2, { anchor: 'middle', rim: 3, land: false });
       }
-    }, { title: m.title || 'figure' });
+    }, { title: smartTitle(m, 'figure') });
     const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26], on = (pts) => pts.map(([px, py]) => [px + x, py + y]);
     const see = (id) => { if (!seen.has(id)) { seen.set(id, now()); touch(0.4); } };
     for (const q of lines) { see(q.from); await trace(on(q.pts), clamp(len(q.pts) / 500, 0.25, 0.6), (e) => (q.p = e)); q.done = now(); see(q.to); }
@@ -1756,7 +1785,7 @@
       }
       b.restore(); l.restore();
       b.strokeStyle = DEEP; b.lineWidth = 1; b.strokeRect(mx + 0.5, my + 0.5, mw - 1, mh - 1);
-    }, { title: m.title || 'map' });
+    }, { title: smartTitle(m, 'map') });
     if (!land) return;
     const [x, y] = [markBox(c)[0] + 4 + X0, markBox(c)[1] + 4 + 26 + Y0], inMap = (p) => p[0] >= 0 && p[0] <= mw && p[1] >= 0 && p[1] <= mh;
     sfx('scan'); await sleep(350);
@@ -1827,7 +1856,7 @@
       const label = S.i < qs.length - 1 ? 'Next' : 'See score', bw = Math.round(textW(label, CHIP()) + 30), br = [x + w - PAD - bw, y + h - 26 - 44, bw, 28];
       chip(b, br[0], br[1], br[2], br[3], label, since - 0.15, { hover: this.hoverId === 'next', down: now() - S.down < 0.15 });
       hits.push({ rect: br, kind: 'pick', id: 'next' });
-    }, { title: m.title || 'quiz' });
+    }, { title: smartTitle(m, 'quiz') });
     c.more = () => hits.map((q) => ({ ...q, part: m.part }));
     c.keep = true;
     c.pick = (id) => {
@@ -1938,7 +1967,7 @@
     stop();
     R.ink.send?.({ type: 'ink_cleared' });
     sfx('dematerialize');
-    fadeOut(marks.filter((m) => m.alive && !m.local && !m.pinned));
+    fadeOut(marks.filter((m) => m.alive && !m.local && !m.pinned && m.kind !== "card"));
   }
   function clearEverything() {
     stop();
@@ -2125,17 +2154,18 @@
   const cached = (map, key, make) => (map.has(key) ? map.get(key) : (map.set(key, make()), map.get(key)));
   const shift = (pts, x, y) => pts.map(([px, py]) => [px + x, py + y]);
   // Rows in card coordinates (from the card's top left), cut to the screen's height with "+N more".
-  function remLayout(x, y) {
+  function remLayout(x, y, rw = REM.m?.w ?? REM_W) {
     const { today, later } = REM.data, all = [...today, ...later];
     const whenW = Math.min(96, Math.max(0, ...all.map((i) => textW(remWhen(i), SMALL))));
-    const tw = REM_W - 40 - (whenW ? whenW + 12 : 0) - 16, rows = [];
+    const tw = rw - 40 - (whenW ? whenW + 12 : 0) - 16, rows = [];
     let yy = 26 + 8;
     const head = (label, n, gap) => { if (gap) yy += 8; rows.push({ head: label, n, gap, y: yy, h: 26 }); yy += 26; };
     const item = (i) => { const lines = wrapRows(i.text, tw, BODY, 3), h = lines.length * 19 + 10; rows.push({ i, lines, when: remWhen(i), y: yy, h }); yy += h; };
     head('Today', today.filter((i) => !i.done).length);
     if (today.length) today.forEach(item); else { rows.push({ note: later.length ? 'Nothing due today' : 'Nothing on your list yet', y: yy, h: 26 }); yy += 26; }
     if (later.length) { head('Later', later.length, true); later.forEach(item); }
-    const max = maxCardH();
+    yy += 6; rows.push({ addBtn: true, y: yy, h: 34 }); yy += 38;
+    const fullH = yy + 10, max = REM.m?.h ?? maxCardH();
     let hidden = 0;
     if (yy + 10 > max) {
       while (rows.length > 1 && rows[rows.length - 1].y + rows[rows.length - 1].h + 26 + 10 > max) { const r = rows.pop(); if (r.i) hidden++; }
@@ -2151,30 +2181,33 @@
       r.check = shift(cached(REM.checks, id, () => handLine([2.5, 6], [5.5, 9.5], { jitter: 0.3 }).concat(handLine([5.5, 9.5], [10.5, 2.5], { jitter: 0.3 }))), x + 18, y + cy);
       r.strikes = r.lines.map((ln, k) => { const lw = textW(ln, BODY); return shift(cached(REM.strikes, `${id}:${k}:${Math.round(lw)}`, () => handLine([0, 0], [lw + 4, 0], { jitter: 0.6 })), x + 38, y + r.y + 13 + k * 19); });
     }
-    return { rows, h: yy + 10 };
+    return { rows, h: yy + 10, fullH };
   }
   function remDraw(b, l, t) {
-    const x = this.x, y = this.y, w = REM_W, h = this.h, cw = this.ready ? w : this.cw, ch = this.ready ? h : this.ch;
+    const x = this.x, y = this.y, w = this.w ?? REM_W, h = this.h, cw = this.ready ? w : this.cw, ch = this.ready ? h : this.ch;
     if (cw < 4) return;
     chrome(b, x, y, cw, ch);
     if (!this.ready) return;
     b.fillStyle = 'rgba(120,255,226,0.06)'; b.fillRect(x + 2, y + 2, w - 4, 24);
     b.fillStyle = DEEP; b.fillRect(x + 2, y + 26, w - 4, 1);
     [0, 1].forEach((k) => { b.fillStyle = k ? DEEP : ACC; b.fillRect(x + 12 + k * 12, y + 11, 5, 5); });
-    typed(b, 'reminders', x + w / 2, y + 17, `500 10px ${MONO}`, DIM, (t - this.opened) / 0.4, { anchor: 'middle' });
-    pinIcon(b, x + w - 44, y + 13, this);
+    typed(b, 'reminders', x + 36 + (w - 36 - 110) / 2, y + 17, `500 10px ${MONO}`, DIM, (t - this.opened) / 0.4, { anchor: 'middle' });
+    pinIcon(b, x + w - 70, y + 13, this); { const sx = x + w - 95, sy = y + 13; b.fillStyle = this.hoverSave ? HOT : this.saved && now() - this.saved < 1.2 ? ACC : DIM; b.fillRect(sx - 1, sy - 6, 2, 7); b.fillRect(sx - 3, sy - 1, 6, 2); b.fillRect(sx - 2, sy + 1, 4, 1); b.fillRect(sx - 5, sy + 3, 10, 2); b.fillRect(sx - 5, sy + 1, 2, 2); b.fillRect(sx + 3, sy + 1, 2, 2); } { const fx = x + w - 44, fy = y + 13, s = 4, f = this.full ? -1 : 1; b.fillStyle = this.hoverFull ? HOT : DIM; for (const d of Array.of({sx:-1,sy:-1},{sx:1,sy:-1},{sx:-1,sy:1},{sx:1,sy:1})) { const cx2 = fx + d.sx * s, cy2 = fy + d.sy * s; b.fillRect(cx2 - (d.sx * f < 0 ? 0 : 2), cy2 - 1, 3, 2); b.fillRect(cx2 - 1, cy2 - (d.sy * f < 0 ? 0 : 2), 2, 3); } }
     const cx = x + w - 18, cyy = y + 13;
     b.fillStyle = this.hoverClose ? HOT : DIM; for (let k = -3; k <= 3; k++) { b.fillRect(cx + k - 1, cyy + k - 1, 2, 2); b.fillRect(cx + k - 1, cyy - k - 1, 2, 2); }
+    b.fillStyle = this.hoverGrip ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + w - 6 - j * 4, y + h - 14 + k * 4, 2, 2);
+    b.fillStyle = this.hoverGripL ? HOT : rgba(ACC, 0.45); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(x + 4 + j * 4, y + h - 14 + k * 4, 2, 2);
     for (const c of [b, l]) { c.save(); c.beginPath(); c.rect(x + 2, y + 27, w - 4, h - 29); c.clip(); }
     try {
       for (const r of this.rows) {
-        const ry = y + r.y;
+        const ry = y + r.y - (this.sy || 0);
         if (r.head) {
           if (r.gap) { b.fillStyle = DEEP; for (let gx = x + 18; gx < x + w - 18; gx += 6) b.fillRect(gx, ry - 5, 3, 1.5); }
           const hw = typed(b, r.head, x + 18, ry + 19, HEADF, TEXT, (t - this.opened) / 0.3);
           if (r.n) typed(b, String(r.n), x + 18 + hw + 8, ry + 18, SMALL, DIM, (t - this.opened - 0.1) / 0.2);
           continue;
         }
+        if (r.addBtn) { const bw = Math.round(textW('+ Add', CHIP()) + 30); chip(b, x + 18, ry + 2, bw, 26, '+ Add', (t - this.opened - 0.1) / 0.3, { hover: this.hoverId === 'rem-add' }); continue; }
         if (r.note || r.more) { typed(b, r.note || r.more, x + (r.note ? 40 : 18), ry + 17, SMALL, DIM, (t - this.opened - 0.15) / 0.4); continue; }
         const it = r.i, a = t - (REM.shown.get(it.id) ?? this.opened);
         if (a <= 0) continue;
@@ -2182,7 +2215,8 @@
         const ink = it.done ? MID : it.overdue ? TONES.coral : this.color;
         pen(b, l, this, r.ring, clamp(a / 0.3, 0, 1), ink, { key: 'r' + it.id, w: 2.4 });
         wrapped(b, r.lines, x + 40, ry + 18, 19, BODY, it.done ? DIM : TEXT, (a - 0.1) / 0.4);
-        if (r.when) typed(b, r.when, x + w - 16, ry + 18, SMALL, it.overdue && !it.done ? TONES.coral : DIM, (a - 0.2) / 0.3, { anchor: 'end' });
+        if (r.when) typed(b, r.when, x + w - 34, ry + 18, SMALL, it.overdue && !it.done ? TONES.coral : DIM, (a - 0.2) / 0.3, { anchor: 'end' });
+        { const rx = x + w - 18, ry2 = ry + 13, delId = 'rem-x:' + it.id; b.fillStyle = this.hoverId === delId ? HOT : DIM; for (let k = -2; k <= 2; k++) { b.fillRect(rx + k - 1, ry2 + k - 1, 2, 2); b.fillRect(rx + k - 1, ry2 - k - 1, 2, 2); } }
         if (it.done) {
           const tk = REM.ticked.get(it.id), u = tk != null ? t - tk : 9;
           pen(b, l, this, r.check, clamp(u / 0.2, 0, 1), HOT, { key: 'c' + it.id, w: 2.2 });
@@ -2197,10 +2231,12 @@
     } finally { b.restore(); l.restore(); }
   }
   function remRelayout() {
-    const c = REM.m, S = scr(), L = remLayout(c.x, c.y);
+    const c = REM.m, S = scr(), L = remLayout(c.x, c.y, c.w ?? REM_W);
     // Grown taller than the room below it: up a little, then laid out again where it now sits.
     const y = clamp(c.y, S[1] + 4, Math.max(S[1] + 4, S[3] - L.h - 64));
-    if (y !== c.y) { c.y = y; Object.assign(c, remLayout(c.x, c.y)); } else Object.assign(c, L);
+    if (y !== c.y) { c.y = y; c.oy = y; Object.assign(c, remLayout(c.x, c.y, c.w ?? REM_W)); } else Object.assign(c, L);
+    if (c.userH != null) { c.h = c.userH; c.ch = c.h; }
+    c.scrollMax = Math.max(0, (c.fullH || c.h) - c.h); c.sy = Math.min(c.sy || 0, c.scrollMax);
     c.__ol = {};
     touch(1.2);
   }
@@ -2210,23 +2246,34 @@
     await fontsReady();
     if (remOpen()) { remRelayout(); return; }
     const L0 = remLayout(0, 0), [x, y] = place(REM_W, L0.h, REM_PART);
-    const c = REM.m = add({ z: 2, part: REM_PART, local: true, card: true, kind: 'reminders', x, y, cw: 0, ch: 0, p: 1, ready: false, opened: Infinity,
-      box() { return [this.x - 4, this.y - 4, REM_W + 8, this.h + 14]; },
+    const c = REM.m = add({ z: 2, part: REM_PART, local: true, card: true, kind: 'reminders', x, y, ox: x, oy: y, w: REM_W, cw: 0, ch: 0, sy: 0, scrollMax: 0, fullH: 0, p: 1, ready: false, opened: Infinity,
+      extend(nh) { this.userH = clamp(nh, 90, Math.max(this.fullH || 0, maxCardH())); this.h = this.userH; this.ch = this.h; this.scrollMax = Math.max(0, (this.fullH || this.h) - this.h); this.sy = Math.min(this.sy || 0, this.scrollMax); touch(0.2); },
+      extendW(nw, shiftX = 0) { const old = this.w ?? REM_W; this.w = clamp(nw, 210, Math.max(480, scr()[2] - scr()[0] - 24)); const dw = this.w - old; if (shiftX) this.dx = (this.dx || 0) - dw * (this.k ?? 1); this.cw = this.w; remRelayout(); },
+      box() { const rw = this.w ?? REM_W; return [this.x - 16, this.y - 4, rw + 32, this.h + 22]; },
+      pick(id) {
+        const s = String(id);
+        REM.until = Math.max(REM.until, now() + 8);
+        if (s === 'rem-add') { sfx('pip'); R.ink.send?.({ type: 'rem_card', op: 'add' }); }
+        else if (s.startsWith('rem-e:')) { sfx('pip'); R.ink.send?.({ type: 'rem_card', op: 'edit', id: s.slice(7) }); }
+        else if (s.startsWith('rem-x:')) { sfx('tick'); R.ink.send?.({ type: 'rem_card', op: 'remove', id: s.slice(7) }); }
+      },
       draw: remDraw,
       hits() {
+        if (this.ready) { b.fillStyle = this.hoverGrip ? HOT : rgba(ACC, 0.55); for (let k = 0; k < 3; k++) for (let j = 0; j <= k; j++) b.fillRect(this.x + REM_W - 6 - j * 4, this.y + this.h - 14 + k * 4, 2, 2); }
         const { x: cx, y: cy } = this;
         return [...this.rows.filter((r) => r.i).map((r) => ({ rect: [cx, cy + r.y, REM_W, r.h], kind: 'tick', id: r.i.id, done: r.i.done, part: REM_PART })),
-          { rect: [cx + REM_W - 28, cy + 2, 26, 22], kind: 'close', part: REM_PART }, { rect: [cx + REM_W - 56, cy + 2, 24, 22], kind: 'pin', part: REM_PART }, { rect: [cx, cy, REM_W - 58, 26], kind: 'drag', part: REM_PART }, { rect: [cx, cy, REM_W, this.h], kind: 'card', part: REM_PART }];
+          { rect: [cx + REM_W - 28, cy + this.h - 28, 28, 28], kind: 'resize', part: REM_PART }, { rect: [cx + REM_W - 28, cy + 2, 26, 22], kind: 'close', part: REM_PART }, { rect: [cx + REM_W - 56, cy + 2, 24, 22], kind: 'pin', part: REM_PART }, { rect: [cx, cy, REM_W - 58, 26], kind: 'drag', part: REM_PART }, { rect: [cx, cy, REM_W, this.h], kind: 'card', part: REM_PART }];
       },
     });
     Object.assign(c, remLayout(x, y));
+    c.scrollMax = Math.max(0, (c.fullH || c.h) - c.h);
     sfx('page');
     clearInterval(REM.timer);
     // Stays while the pointer rests on it (or it's being dragged), then fades.
     REM.timer = setInterval(() => {
       if (!remOpen()) { clearInterval(REM.timer); return; }
       if (drag?.part === REM_PART || (G.ptr && inside(markBox(c), G.ptr[0], G.ptr[1]))) REM.until = Math.max(REM.until, now() + 2.5);
-      if (now() > REM.until && !c.pinned) remClose(); // pinned: it stays until its ×
+      if (false && now() > REM.until && !c.pinned) remClose(); // pinned: it stays until its ×
     }, 250);
     await tween(0.35, (u) => { const e = ease(u); c.cw = REM_W * e; c.ch = c.h * e; });
     c.ready = true; c.opened = now();
@@ -2311,11 +2358,11 @@
   };
   const setHover = (h) => {
     const m = h?.m ?? null;
-    if (hovered && hovered !== m) { hovered.hover = false; hovered.hoverClose = false; hovered.hoverFull = false; hovered.hoverSave = false; hovered.hoverPin = false; hovered.hoverGrip = false; hovered.hoverId = null; hovered.setHover?.(false); }
-    if (m) { m.hover = h.kind === 'button' || h.kind === 'link' || h.kind === 'clearall'; m.hoverClose = h.kind === 'close'; m.hoverFull = h.kind === 'full'; m.hoverSave = h.kind === 'save'; m.hoverPin = h.kind === 'pin'; m.hoverGrip = h.kind === 'resize'; m.hoverId = h.kind === 'tick' || h.kind === 'pick' ? h.id : null; m.setHover?.(h.kind === 'button'); }
+    if (hovered && hovered !== m) { hovered.hover = false; hovered.hoverClose = false; hovered.hoverFull = false; hovered.hoverSave = false; hovered.hoverPin = false; hovered.hoverGrip = false; hovered.hoverGripL = false; hovered.hoverId = null; hovered.setHover?.(false); }
+    if (m) { m.hover = h.kind === 'button' || h.kind === 'link' || h.kind === 'clearall'; m.hoverClose = h.kind === 'close'; m.hoverFull = h.kind === 'full'; m.hoverSave = h.kind === 'save'; m.hoverPin = h.kind === 'pin'; m.hoverEdit = h.kind === 'edit'; m.hoverGrip = h.kind === 'resize'; m.hoverGripL = h.kind === 'resize-l'; m.hoverId = h.kind === 'tick' || h.kind === 'pick' ? h.id : null; m.setHover?.(h.kind === 'button'); }
     if (hovered !== m || m) touch(0.2);
     hovered = m;
-    document.documentElement.style.cursor = h && (h.kind === 'button' || h.kind === 'close' || h.kind === 'full' || h.kind === 'save' || h.kind === 'pin' || h.kind === 'link' || h.kind === 'clearall' || h.kind === 'tick' || h.kind === 'pick') ? 'pointer' : h?.kind === 'drag' ? 'grab' : h?.kind === 'resize' ? 'nwse-resize' : 'default';
+    document.documentElement.style.cursor = h && (h.kind === 'button' || h.kind === 'close' || h.kind === 'full' || h.kind === 'save' || h.kind === 'pin' || h.kind === 'edit' || h.kind === 'link' || h.kind === 'clearall' || h.kind === 'tick' || h.kind === 'pick') ? 'pointer' : h?.kind === 'drag' ? 'grab' : h?.kind === 'resize' ? 'nwse-resize' : h?.kind === 'resize-l' ? 'nesw-resize' : (h?.kind === 'extend' || h?.kind === 'extend-t') ? 'ns-resize' : (h?.kind === 'extend-r' || h?.kind === 'extend-l') ? 'ew-resize' : 'default';
   };
   const ours = (e) => !!hitAt(e.clientX, e.clientY) || !!drag || !!sizing;
   addEventListener('pointerdown', (e) => {
@@ -2331,14 +2378,17 @@
     else if (h.kind === 'clearall') clearEverything();
     else if (h.kind === 'full') toggleFull(h.m);
     else if (h.kind === 'save') saveCard(h.m, h.title);
+    else if (h.kind === 'edit' && h.m.onEdit) h.m.onEdit();
     else if (h.kind === 'resize') { sizing = { m: h.m }; sfx('grab'); touch(); }
+    else if (h.kind === 'resize-l') { sizing = { m: h.m, leftCorner: true }; sfx('grab'); touch(); }
+    else if ((h.kind === 'extend' || h.kind === 'extend-t') && h.m.extend) { sizing = { m: h.m, extend: h.kind }; sfx('grab'); touch(); }
+    else if ((h.kind === 'extend-r' || h.kind === 'extend-l') && h.m.extendW) { sizing = { m: h.m, side: h.kind }; sfx('grab'); touch(); }
     // A full-screen card stays up when its body is clicked (there's nothing under it to be after).
     else if (h.kind === 'card' && h.m.full) return;
     // A click on a card's body: they're after what's under it, so the drawing goes, as it does when another window
     // comes to the front (cards move by their top bar). Not a quiz (a click between two options isn't "go away"),
     // and not the reminders card or a drawing that goes by itself, which still move by the body.
     else if (h.kind === 'card' && h.m.keep) return;
-    else if (h.kind === 'card' && !h.m.local && !drawnBy.has(h.part)) clearDrawing();
     else if (h.kind === 'drag' || h.kind === 'card') { drag = { part: h.part, x: e.clientX, y: e.clientY, ms: partMarks(h.part), start: partMarks(h.part).map((m) => [m.dx, m.dy]) }; sfx('grab'); touch(); }
   }, true);
   addEventListener('pointermove', (e) => {
@@ -2346,6 +2396,11 @@
     // Resizing: the corner follows the pointer, keeping the card's shape (it zooms from its top left).
     if (sizing) {
       const m = sizing.m, left = m.ox + m.dx, top = m.oy + m.dy;
+      if (sizing.extend === 'extend' || sizing.extend === true) { m.extend((e.clientY - top) / (m.k ?? 1)); touch(0.2); return; }
+      if (sizing.extend === 'extend-t') { const oldH = m.h, bottom = top + oldH * (m.k ?? 1); m.extend((bottom - e.clientY) / (m.k ?? 1)); m.dy -= (m.h - oldH) * (m.k ?? 1); touch(0.2); return; }
+      if (sizing.side === 'extend-r') { m.extendW((e.clientX - left) / (m.k ?? 1), false); touch(0.2); return; }
+      if (sizing.side === 'extend-l') { const right = left + m.w * (m.k ?? 1); m.extendW((right - e.clientX) / (m.k ?? 1), true); touch(0.2); return; }
+      if (sizing.leftCorner) { const oldK = m.k ?? 1, right = left + m.w * oldK; m.k = clamp(Math.max((right - e.clientX) / m.w, (e.clientY - top) / m.h), 0.6, maxK(m)); m.dx -= m.w * (m.k - oldK); touch(0.2); return; }
       m.k = clamp(Math.max((e.clientX - left) / m.w, (e.clientY - top) / m.h), 0.6, maxK(m));
       touch(0.2); return;
     }
@@ -2356,12 +2411,13 @@
     if (!ours(e)) return;
     e.stopPropagation();
     // Over a card too tall for the screen: scroll its insides.
-    const m = hitAt(e.clientX, e.clientY)?.m;
-    if (m?.scrollMax > 0) { e.preventDefault(); m.sy = clamp(m.sy + e.deltaY, 0, m.scrollMax); touch(0.3); }
+    const m = hitAt(e.clientX, e.clientY)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && q.scrollMax > 0 && inside(markBox(q), e.clientX, e.clientY));
+    if (m?.scrollMax > 0) { e.preventDefault(); m.sy = clamp((m.sy || 0) + e.deltaY, 0, m.scrollMax); touch(0.3); }
   }, { capture: true, passive: false });
 
   // ---------------------------------------------------------------- the host's way in (host.js)
   R.inkHit = (x, y) => !!drag || !!sizing || !!hitAt(x, y);
+  R.inkWheel = (x, y, dy) => { const m = hitAt(x, y)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && q.scrollMax > 0 && inside(markBox(q), x, y)); if (m?.scrollMax > 0) { m.sy = clamp((m.sy || 0) + dy, 0, m.scrollMax); touch(0.3); return true; } return false; };
   // Every clickable area as [x, y, w, h]: Linux hosts make these part of the window's click shape (host.js).
   R.inkRects = () => {
     const out = [];
@@ -2371,7 +2427,7 @@
     }
     return out;
   };
-  R.ink = {
+  R.ink = { wheel: R.inkWheel,
     send: null, invoke: null,
     // A segment of a drawing from the sidecar: { id, seg, beats, edits, last, win, busy }.
     play(e) { G.q.push(e); pump(); },
