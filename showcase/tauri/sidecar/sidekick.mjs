@@ -928,7 +928,13 @@ let agentStale = false;
 let session = null;
 // The last conversation: it carries on until New conversation (old turns are folded into a summary, not cut off).
 // Requests (and reminders due at launch) wait for it, so they continue it instead of starting a new one.
-const resumed = loadLatestSession().then((s) => { if (s && !session) session = s; }).catch((e) => console.error('resume', e));
+const SESSION_ROLLOVER_TOKENS = 10_000, SESSION_MAX_AGE_MS = 12 * 3600_000;
+const resumed = loadLatestSession().then((s) => {
+  if (!s || session) return;
+  const age = Date.now() - (s.lastActiveAt ?? s.createdAt ?? 0);
+  if (age > SESSION_MAX_AGE_MS || approxTokens(s.messages) >= SESSION_ROLLOVER_TOKENS) return;
+  session = s;
+}).catch((e) => console.error('resume', e));
 const BUDGET_CAP = 120_000;
 // Tokens per request: kept tight for a quick reply out loud. The ChatGPT plan has its own windows (accountId).
 let credsAccountId;
@@ -1147,6 +1153,12 @@ const syncSession = () => {
   session.messages = forDisk(withoutLive(agent.getMessages()));
   session.lastActiveAt = Date.now();
   if (pendingFold?.session === session) applyPendingFold(); else saveSession(session);
+  if (!busy && !queued && !intro && approxTokens(session.messages) >= SESSION_ROLLOVER_TOKENS) {
+    session = newSession();
+    agentStale = true;
+    ccResume = null;
+    saveSession(session);
+  }
 };
 
 // ---------- folding old turns (compaction) ----------

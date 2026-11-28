@@ -1848,7 +1848,25 @@ fn helper_binary(name: &str) -> Option<PathBuf> {
 fn log_stdio(name: &str) -> Stdio {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .and_then(|h| log_path(std::path::Path::new(&h), name))
+        .and_then(|h| {
+            let dated;
+            let eff = if name == "sidekick.log" {
+                let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+                let z = secs.div_euclid(86_400) + 719_468;
+                let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+                let doe = (z - era * 146_097) as u64;
+                let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+                let y = (yoe as i64) + era * 400;
+                let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                let mp = (5 * doy + 2) / 153;
+                let d = doy - (153 * mp + 2) / 5 + 1;
+                let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                let y = y + if m <= 2 { 1 } else { 0 };
+                dated = format!("sidekick-{:04}-{:02}-{:02}.log", y, m, d);
+                dated.as_str()
+            } else { name };
+            log_path(std::path::Path::new(&h), eff)
+        })
         .and_then(|p| {
             rotate_log(&p);
             OpenOptions::new().create(true).append(true).open(p).ok()

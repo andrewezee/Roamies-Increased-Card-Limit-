@@ -2144,6 +2144,119 @@
     for (const f of G.idle.splice(0)) f();
   }
 
+  // ---------------------------------------------------------------- floating inline editor & date picker
+  let inlineBox = null;
+  function closeInlineEdit() {
+    if (!inlineBox) return;
+    inlineBox.remove(); inlineBox = null;
+    R.ink.invoke?.('set_typing', { on: false }); touch(0.15);
+  }
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && inlineBox) { e.preventDefault(); e.stopImmediatePropagation(); closeInlineEdit(); } }, true);
+  function mkOverlayBox(x, y, w = 276) {
+    closeInlineEdit();
+    const wrap = document.createElement('div');
+    const left = clamp(Math.round(x), 12, Math.max(12, innerWidth - w - 12));
+    const top = clamp(Math.round(y), 12, Math.max(12, innerHeight - 310));
+    Object.assign(wrap.style, { position: 'fixed', left: left + 'px', top: top + 'px', width: w + 'px', zIndex: '99999', background: 'rgba(6,22,24,0.97)', color: '#dcfff6', border: '1.5px solid #78ffe2', borderRadius: '10px', boxShadow: '0 10px 28px rgba(0,0,0,0.7)', padding: '10px 12px', fontFamily: MONO, fontSize: '11px', pointerEvents: 'auto', userSelect: 'none' });
+    wrap.addEventListener('pointerdown', (e) => e.stopPropagation());
+    return wrap;
+  }
+  function mkBtn(label, primary, onTap) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+    Object.assign(b.style, { padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '10px', fontFamily: 'inherit', border: primary ? '1px solid #78ffe2' : '1px solid rgba(120,255,226,0.35)', background: primary ? '#78ffe2' : 'rgba(120,255,226,0.1)', color: primary ? '#032722' : '#dcfff6', fontWeight: primary ? '700' : '400' });
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); onTap(); });
+    return b;
+  }
+  function openInlineEdit({ title = 'Edit', value = '', placeholder = '', x = 80, y = 80, onSave }) {
+    const wrap = mkOverlayBox(x, y, 280);
+    const lbl = document.createElement('div'); lbl.textContent = title; Object.assign(lbl.style, { fontSize: '10px', letterSpacing: '0.06em', color: ACC, marginBottom: '6px', textTransform: 'uppercase' });
+    const inp = document.createElement('input'); inp.type = 'text'; inp.value = value; inp.placeholder = placeholder;
+    Object.assign(inp.style, { width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(120,255,226,0.45)', background: 'rgba(3,15,17,0.92)', color: HOT, outline: 'none', fontFamily: 'inherit', fontSize: '11px' });
+    const submit = () => { const v = inp.value.trim(); closeInlineEdit(); if (v) onSave?.(v); };
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); submit(); } else if (e.key === 'Escape') { e.preventDefault(); closeInlineEdit(); } });
+    const bar = document.createElement('div'); Object.assign(bar.style, { display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '8px' });
+    bar.append(mkBtn('Cancel', false, closeInlineEdit), mkBtn('Save', true, submit));
+    wrap.append(lbl, inp, bar); document.body.appendChild(wrap); inlineBox = wrap;
+    R.ink.invoke?.('set_typing', { on: true }); touch(0.2); requestAnimationFrame(() => { inp.focus(); inp.select(); });
+  }
+  function parseNaturalDue(raw, baseDate) {
+    const t = String(raw || '').trim();
+    if (!t) return null;
+    const low = t.toLowerCase();
+    const parseClock = (part, defH, defM) => {
+      let str = String(part || '').trim();
+      if (!str) return [defH, defM];
+      let ap = '';
+      if (str.endsWith('am') || str.endsWith('pm')) { ap = str.slice(-2); str = str.slice(0, -2).trim(); }
+      const segs = str.split(':');
+      let hh = Number(segs.at(0)), mm = segs.length > 1 ? Number(segs.at(1)) : 0;
+      if (!Number.isFinite(hh) || !Number.isFinite(mm)) return [defH, defM];
+      if (ap === 'pm' && hh < 12) hh += 12;
+      if (ap === 'am' && hh === 12) hh = 0;
+      return [hh, mm];
+    };
+    if (low.startsWith('today')) {
+      const d = new Date(), [hh, mm] = parseClock(low.slice(5), 17, 0);
+      d.setHours(hh, mm, 0, 0); return d.getTime();
+    }
+    if (low.startsWith('tomorrow') || low.startsWith('tmr')) {
+      const d = new Date(); d.setDate(d.getDate() + 1);
+      const rest = low.startsWith('tomorrow') ? low.slice(8) : low.slice(3);
+      const [hh, mm] = parseClock(rest, 9, 0);
+      d.setHours(hh, mm, 0, 0); return d.getTime();
+    }
+    const parts = t.replace('T', ' ').split(' ').filter(Boolean);
+    const ymd = parts.at(0).split('-');
+    if (ymd.length === 3 && ymd.at(0).length === 4) {
+      const [y, mo, da] = ymd.map(Number);
+      const [hh, mm] = parts.length > 1 ? parseClock(parts.at(1), baseDate.getHours(), baseDate.getMinutes()) : [baseDate.getHours(), baseDate.getMinutes()];
+      if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(da)) return new Date(y, mo - 1, da, hh, mm, 0, 0).getTime();
+    }
+    const parsed = Date.parse(t);
+    return Number.isFinite(parsed) ? parsed : t;
+  }
+  function openDatePicker({ due = null, x = 80, y = 80, onSave }) {
+    const wrap = mkOverlayBox(x, y, 292), pad = (n) => String(n).padStart(2, '0');
+    let sel = due ? new Date(due) : (() => { const d = new Date(); d.setHours(9, 0, 0, 0); return d; })(), viewY = sel.getFullYear(), viewM = sel.getMonth();
+    const fmtInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const lbl = document.createElement('div'); lbl.textContent = 'Reminder Date'; Object.assign(lbl.style, { fontSize: '10px', letterSpacing: '0.06em', color: ACC, marginBottom: '6px', textTransform: 'uppercase' });
+    const inp = document.createElement('input'); inp.type = 'text'; inp.value = due ? fmtInput(sel) : ''; inp.placeholder = 'YYYY-MM-DD HH:MM or today 5pm';
+    Object.assign(inp.style, { width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(120,255,226,0.45)', background: 'rgba(3,15,17,0.92)', color: HOT, outline: 'none', fontFamily: 'inherit', fontSize: '11px' });
+    const nav = document.createElement('div'); Object.assign(nav.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', fontSize: '11px' });
+    const monthLbl = document.createElement('div'); Object.assign(monthLbl.style, { color: '#dcfff6', fontWeight: '700', fontSize: '11px' });
+    const grid = document.createElement('div'); Object.assign(grid.style, { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginTop: '5px', textAlign: 'center', fontSize: '10px' });
+    const renderCal = () => {
+      const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      monthLbl.textContent = `${names.at(viewM)} ${viewY}`; grid.innerHTML = '';
+      for (const wd of ['Su','Mo','Tu','We','Th','Fr','Sa']) { const h = document.createElement('div'); h.textContent = wd; Object.assign(h.style, { color: '#8ab8b0', padding: '2px 0', fontSize: '9px' }); grid.appendChild(h); }
+      const firstDow = new Date(viewY, viewM, 1).getDay(), daysInMonth = new Date(viewY, viewM + 1, 0).getDate(), nowD = new Date();
+      for (let i = 0; i < firstDow; i++) grid.appendChild(document.createElement('div'));
+      for (let day = 1; day <= daysInMonth; day++) {
+        const cell = document.createElement('button'); cell.type = 'button'; cell.textContent = String(day);
+        const isSel = sel.getFullYear() === viewY && sel.getMonth() === viewM && sel.getDate() === day, isTod = nowD.getFullYear() === viewY && nowD.getMonth() === viewM && nowD.getDate() === day;
+        Object.assign(cell.style, { padding: '4px 0', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', fontFamily: 'inherit', border: `1px solid ${isSel ? '#78ffe2' : isTod ? 'rgba(120,255,226,0.4)' : 'transparent'}`, background: isSel ? '#78ffe2' : 'rgba(255,255,255,0.03)', color: isSel ? '#032722' : '#dcfff6', fontWeight: isSel ? '700' : '400' });
+        cell.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); sel.setFullYear(viewY, viewM, day); inp.value = fmtInput(sel); renderCal(); });
+        grid.appendChild(cell);
+      }
+    };
+    inp.addEventListener('input', () => { const res = parseNaturalDue(inp.value, sel); if (typeof res === 'number' && Number.isFinite(res)) { sel = new Date(res); viewY = sel.getFullYear(); viewM = sel.getMonth(); renderCal(); } });
+    nav.append(mkBtn('<', false, () => { viewM--; if (viewM < 0) { viewM = 11; viewY--; } renderCal(); }), monthLbl, mkBtn('>', false, () => { viewM++; if (viewM > 11) { viewM = 0; viewY++; } renderCal(); }));
+    renderCal();
+    const quick = document.createElement('div'); Object.assign(quick.style, { display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '8px' });
+    quick.append(
+      mkBtn('Today', false, () => { const n = new Date(); n.setHours(17, 0, 0, 0); closeInlineEdit(); onSave?.({ dueMs: n.getTime() }); }),
+      mkBtn('Tomorrow', false, () => { const n = new Date(); n.setDate(n.getDate() + 1); n.setHours(9, 0, 0, 0); closeInlineEdit(); onSave?.({ dueMs: n.getTime() }); }),
+      mkBtn('+1 Week', false, () => { const n = new Date(due || Date.now()); n.setDate(n.getDate() + 7); closeInlineEdit(); onSave?.({ dueMs: n.getTime() }); }),
+      mkBtn('No Date', false, () => { closeInlineEdit(); onSave?.({ dueMs: null }); })
+    );
+    const applyInput = () => { const raw = inp.value.trim(); closeInlineEdit(); if (!raw) { onSave?.({ dueMs: null }); return; } const res = parseNaturalDue(raw, sel); if (typeof res === 'number') onSave?.({ dueMs: res }); else if (typeof res === 'string') onSave?.({ when: res }); };
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); applyInput(); } else if (e.key === 'Escape') { e.preventDefault(); closeInlineEdit(); } });
+    const bar = document.createElement('div'); Object.assign(bar.style, { display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '8px' });
+    bar.append(mkBtn('Cancel', false, closeInlineEdit), mkBtn('Apply', true, applyInput));
+    wrap.append(lbl, inp, nav, grid, quick, bar); document.body.appendChild(wrap); inlineBox = wrap;
+    R.ink.invoke?.('set_typing', { on: true }); touch(0.2); requestAnimationFrame(() => inp.focus());
+  }
+
   // ---------------------------------------------------------------- the reminders card: Today / Later
   // The sidecar's list ({ today, later, seconds, flash, toggle }), shown as a card like the drawn list. It belongs to
   // this overlay (part 'reminders', local): new drawings and stale windows leave it; ×, Esc and Clear all close it.
@@ -2252,20 +2365,41 @@
       box() { const rw = this.w ?? REM_W; return [this.x - 16, this.y - 4, rw + 32, this.h + 22]; },
       pick(id) {
         const s = String(id);
-        REM.until = Math.max(REM.until, now() + 8);
-        if (s === 'rem-add') { sfx('pip'); R.ink.send?.({ type: 'rem_card', op: 'add' }); }
-        else if (s.startsWith('rem-e:')) { sfx('pip'); R.ink.send?.({ type: 'rem_card', op: 'edit', id: s.slice(7) }); }
-        else if (s.startsWith('rem-x:')) { sfx('tick'); R.ink.send?.({ type: 'rem_card', op: 'remove', id: s.slice(7) }); }
+        const all = [...REM.data.today, ...REM.data.later];
+        const rx = this.ox + this.dx, ry = this.oy + this.dy;
+        if (s === 'rem-add') {
+          sfx('pip');
+          openInlineEdit({ title: 'Add reminder', placeholder: 'What to remember', x: rx + 18, y: ry + 48, onSave: (text) => R.ink.send?.({ type: 'rem_card', op: 'add', text }) });
+        } else if (s.startsWith('rem-e:')) {
+          const itemId = s.slice(6), cur = all.find((it) => it.id === itemId);
+          if (!cur) return;
+          sfx('pip');
+          openInlineEdit({ title: 'Edit reminder', value: cur.text, placeholder: 'Reminder text', x: rx + 24, y: ry + 64, onSave: (text) => R.ink.send?.({ type: 'rem_card', op: 'edit', id: itemId, text }) });
+        } else if (s.startsWith('rem-d:')) {
+          const itemId = s.slice(6), cur = all.find((it) => it.id === itemId);
+          if (!cur) return;
+          sfx('pip');
+          openDatePicker({ due: cur.due ?? null, x: rx + 24, y: ry + 64, onSave: (payload) => R.ink.send?.({ type: 'rem_card', op: 'due', id: itemId, ...payload }) });
+        } else if (s.startsWith('rem-x:')) {
+          sfx('tick');
+          R.ink.send?.({ type: 'rem_card', op: 'remove', id: s.slice(6) });
+        }
       },
       draw: remDraw,
       hits() {
-        const { x: cx, y: cy } = this, rw = this.w ?? REM_W;
-        return [...this.rows.filter((r) => r.i).flatMap((r) => [
-            { rect: [cx + 8, cy + r.y - (this.sy || 0), 30, r.h], kind: 'tick', id: r.i.id, done: r.i.done, part: REM_PART },
-            { rect: [cx + 38, cy + r.y - (this.sy || 0), Math.max(20, rw - 72), r.h], kind: 'pick', id: 'rem-e:' + r.i.id, part: REM_PART },
-            { rect: [cx + rw - 32, cy + r.y - (this.sy || 0), 26, r.h], kind: 'pick', id: 'rem-x:' + r.i.id, part: REM_PART },
-          ]),
-          ...this.rows.filter((r) => r.addBtn).map((r) => ({ rect: [cx + 18, cy + r.y + 2 - (this.sy || 0), Math.round(textW('+ Add', CHIP()) + 30), 26], kind: 'pick', id: 'rem-add', part: REM_PART })),
+        const { x: cx, y: cy } = this, rw = this.w ?? REM_W, sy = this.sy || 0;
+        const vis = (r) => (r.y - sy + r.h > 27) && (r.y - sy < this.h);
+        return [...this.rows.filter((r) => r.i && vis(r)).flatMap((r) => {
+            const dw = r.when ? Math.min(104, Math.ceil(textW(r.when, SMALL)) + 10) : 56;
+            const textWMax = Math.max(24, rw - 42 - dw - 34);
+            return [
+              { rect: [cx + 8, cy + r.y - sy, 30, r.h], kind: 'tick', id: r.i.id, done: r.i.done, part: REM_PART },
+              { rect: [cx + 38, cy + r.y - sy, textWMax, r.h], kind: 'pick', id: 'rem-e:' + r.i.id, part: REM_PART },
+              { rect: [cx + rw - 34 - dw, cy + r.y - sy, dw, r.h], kind: 'pick', id: 'rem-d:' + r.i.id, part: REM_PART },
+              { rect: [cx + rw - 32, cy + r.y - sy, 26, r.h], kind: 'pick', id: 'rem-x:' + r.i.id, part: REM_PART },
+            ];
+          }),
+          ...this.rows.filter((r) => r.addBtn && vis(r)).map((r) => ({ rect: [cx + 18, cy + r.y + 2 - sy, Math.round(textW('+ Add', CHIP()) + 30), 26], kind: 'pick', id: 'rem-add', part: REM_PART })),
           { rect: [cx + rw - 28, cy + this.h - 28, 32, 32], kind: 'resize', part: REM_PART }, { rect: [cx - 4, cy + this.h - 28, 32, 32], kind: 'resize-l', part: REM_PART }, { rect: [cx + 28, cy + this.h - 6, Math.max(10, rw - 56), 20], kind: 'extend', part: REM_PART }, { rect: [cx + rw - 6, cy + 26, 20, Math.max(10, this.h - 54)], kind: 'extend-r', part: REM_PART }, { rect: [cx - 14, cy + 26, 20, Math.max(10, this.h - 32)], kind: 'extend-l', part: REM_PART }, { rect: [cx + 12, cy - 10, Math.max(10, rw - 24), 12], kind: 'extend-t', part: REM_PART },
           { rect: [cx + rw - 28, cy + 2, 26, 22], kind: 'close', part: REM_PART }, { rect: [cx + rw - 54, cy + 2, 22, 22], kind: 'full', part: REM_PART }, { rect: [cx + rw - 82, cy + 2, 24, 22], kind: 'pin', part: REM_PART }, { rect: [cx + rw - 106, cy + 2, 22, 22], kind: 'save', part: REM_PART, title: 'reminders' }, { rect: [cx, cy, rw - 108, 26], kind: 'drag', part: REM_PART }, { rect: [cx, cy, rw, this.h], kind: 'card', part: REM_PART }];
       },
@@ -2287,7 +2421,7 @@
     if (REM.flashAt === -1) REM.flashAt = (REM.shown.get(REM.flash) ?? c.opened) + 0.3;
     touch(2 + c.rows.length * 0.08); syncClearAll();
   }
-  function remClose(sound) { if (!remOpen()) return; clearInterval(REM.timer); if (sound) sfx('poof'); REM.until = 0; fadeOut([REM.m]); }
+  function remClose(sound) { closeInlineEdit(); if (!remOpen()) return; clearInterval(REM.timer); if (sound) sfx('poof'); REM.until = 0; fadeOut([REM.m]); }
   function reminders(msg = {}) {
     const today = msg.today ?? [], later = msg.later ?? [], all = [...today, ...later], t = now();
     const before = new Map([...REM.data.today, ...REM.data.later].map((i) => [i.id, i]));
@@ -2369,8 +2503,14 @@
     hovered = m;
     document.documentElement.style.cursor = h && (h.kind === 'button' || h.kind === 'close' || h.kind === 'full' || h.kind === 'save' || h.kind === 'pin' || h.kind === 'edit' || h.kind === 'link' || h.kind === 'clearall' || h.kind === 'tick' || h.kind === 'pick') ? 'pointer' : h?.kind === 'drag' ? 'grab' : h?.kind === 'resize' ? 'nwse-resize' : h?.kind === 'resize-l' ? 'nesw-resize' : (h?.kind === 'extend' || h?.kind === 'extend-t') ? 'ns-resize' : (h?.kind === 'extend-r' || h?.kind === 'extend-l') ? 'ew-resize' : 'default';
   };
-  const ours = (e) => !!hitAt(e.clientX, e.clientY) || !!drag || !!sizing;
+  const ours = (e) => !!inlineBox || !!hitAt(e.clientX, e.clientY) || !!drag || !!sizing;
   addEventListener('pointerdown', (e) => {
+    if (inlineBox && !inlineBox.contains(e.target)) {
+      closeInlineEdit();
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
     const h = hitAt(e.clientX, e.clientY);
     if (!h) return;
     e.stopPropagation(); e.preventDefault();
@@ -2422,7 +2562,7 @@
   }, { capture: true, passive: false });
 
   // ---------------------------------------------------------------- the host's way in (host.js)
-  R.inkHit = (x, y) => !!drag || !!sizing || !!hitAt(x, y);
+  R.inkHit = (x, y) => !!inlineBox || !!drag || !!sizing || !!hitAt(x, y);
   R.inkWheel = (x, y, dy) => { const m = hitAt(x, y)?.m || [...marks].sort((a, b) => b.z - a.z).find((q) => q.alive && q.scrollMax > 0 && inside(markBox(q), x, y)); if (m?.scrollMax > 0) { m.sy = clamp((m.sy || 0) + dy, 0, m.scrollMax); touch(0.3); return true; } return false; };
   // Every clickable area as [x, y, w, h]: Linux hosts make these part of the window's click shape (host.js).
   R.inkRects = () => {
@@ -2441,7 +2581,7 @@
     // { all: true } (Esc) takes too. parts: these go as well (a cancelled request's cards). stop: also ends what's playing.
     clear(e = {}) {
       if (e.stop || !e.screen) stop();
-      const gone = marks.filter((m) => m.alive && !m.pinned && (e.parts?.includes(m.part) || (e.screen ? m.screen : e.all || !m.local)));
+      const gone = marks.filter((m) => m.alive && !m.pinned && !m.local && (e.parts?.includes(m.part) || (e.screen ? m.screen : e.all || !m.local)));
       fadeOut(gone);
     },
     // Another window came to the front, or that window moved or closed: the drawing no longer sits on what it was
@@ -2454,7 +2594,7 @@
     reminders,
     get reminding() { return remOpen(); },
     // Pinned cards stay put on purpose: they don't count, so Esc still sends the Roamie away with one up.
-    get busy() { return G.playing || marks.some((m) => m.alive && !m.pinned); },
+    get busy() { return G.playing || marks.some((m) => m.alive && !m.pinned && !m.local); },
     get playing() { return G.playing; },
     // Marks still on the real screen (frames, loops, arrows, labels): unlike cards they have no close button.
     get loose() { return marks.some((m) => m.alive && m.screen && !m.leaving); },
